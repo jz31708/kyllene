@@ -27,15 +27,15 @@ Measured 22 November 2026:
 | JDK | Temurin 21.0.13.1 at `~/jdk` (`JAVA_HOME` set) for the client; Gradle and Kotlin daemons on auto-provisioned **JBR 25** |
 | Gradle | 9.8.0 via the wrapper; AGP 9.5.0, Kotlin 2.4.20, KSP 2.3.12 |
 | Android SDK | `~/Android/Sdk`: platforms `android-36` and `android-37.1`, build-tools 36.0.0 and 37.0.0; adb 37.0.1 |
-| Disk | 97% used, ~5.6 GB free — enough for an incremental build, not for a clean checkout plus caches |
-| Builds | `:androidApp:assembleDebug` 2 m 25 s cold / 19 s warm; `:wearApp:assembleDebug` under a minute |
+| Disk | 96% used, ~5.8 GB free — enough for an incremental build, not for a clean checkout plus caches |
+| Builds | `:androidApp:assembleDebug` 2 m 25 s cold / 13–19 s warm; `:wearApp:assembleDebug` under a minute |
 | Tests | `:shared:core:testAndroidHostTest --tests dev.hermeskotlin.core.speak.SpeakQueueTest` — 19 tests, 0 failures |
 
 ```bash
 cd ~/repos/kyllene
 git fetch origin && git checkout board/voice-door && git pull --ff-only
-./gradlew :androidApp:assembleDebug          # the phone app
-./gradlew :wearApp:assembleDebug             # the watch app
+# pass the release tag, or the APK reports the modules' 0.1.0 default:
+./gradlew :androidApp:assembleDebug :wearApp:assembleDebug -PappVersion=v0.17.0
 ./gradlew :shared:core:testAndroidHostTest    # unit tests, including the speak queue
 ```
 
