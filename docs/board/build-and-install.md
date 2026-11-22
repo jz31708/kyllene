@@ -87,10 +87,15 @@ so it belongs in a secure card, not in a note.
 
 ## Signing into a gateway
 
-The phone signs in to the **dashboard** (`https://<host>:9119`), not the API server on `:8642`. Native sign-in is
-an OAuth PKCE flow in a Custom Tab with a loopback redirect, or a password login; both end in a WebSocket ticket.
-The dashboard must be reachable from the phone's network — on the tailnet, `hermes.tail38b488.ts.net` — and a
-non-loopback bind requires an auth provider, which is why the phone can never talk to an unauthenticated dashboard.
+The phone signs in to the **dashboard**, not the API server on `:8642`. On this homelab the dashboard's public URL
+is **`https://hermes.tail38b488.ts.net:8445`** (`dashboard.public_url` in the gateway config); the loopback/tailnet
+`…:9119` listener serves the same app.
+
+Use the hostname, not the bare tailnet IP. The native sign-in flow sets its PKCE cookie on the host that served
+`/auth/native/authorize` but redirects the provider back to `public_url`, so pointing the phone at
+`http://100.96.63.62:9119` ends in `{"detail":"Missing PKCE state cookie"}` — the cookie is host-only and never
+reaches the callback. The hostname makes both ends the same origin, and the browser's existing dashboard session
+then finishes sign-in in one tap.
 
 ## What the phone talks to, in one line
 
