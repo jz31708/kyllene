@@ -26,11 +26,19 @@ both sides connecting outbound. The phone subscribes on its own topic while "Not
 `PhoneToolsBridge.ring` → `PhoneTool.CallMe` → a voice chat whose opener is the call's `reason`. Nothing about
 that path needs the gateway to be reachable at the moment the push lands.
 
+Two limits of that path matter here. It always **rings a new call**: while a call is on, `ringForAgent` refuses
+the push as busy, so it cannot put a line into the call that is already happening. And a turn that arrives in the
+call's session from elsewhere is rendered in the transcript but never voiced — the call reads aloud only the reply
+to the turn it sent. Server-pushed speech therefore needs its own small path; neither existing one can carry it.
+
 Two other channels exist and neither is a push: the dashboard WebSocket (`/api/ws`, JSON-RPC, events and
 server-to-client requests) while the app is connected, and the gateway API server's SSE runs endpoint. The
 dashboard socket is the fast path while the app is in the foreground; ntfy is the one that survives the app being
 backgrounded or the phone being off the tailnet. Hermes has no FCM or APNs; the phone holds its own connection or
-reads its own topic.
+reads its own topic. Both need the app's process alive: the push wakes nothing by itself, and Android will not let
+a background app start a media foreground service. That is why a queued line on an idle phone has to become a
+notification (or, for `answer_now`, the ring that already exists) rather than speech.
+
 
 ## 2. The one addition: `speak`
 
@@ -47,18 +55,23 @@ A new gateway → phone type in the same envelope, same crypto, same `id`/`ts` r
 }
 ```
 
-- `text` is what is said, verbatim. The gateway keeps it to about 2000 characters (the envelope limit); a longer
-  answer arrives as several items in order, each with its own `id` and the same `call`.
+- `text` is what is said, verbatim. The gateway keeps a part to about 2000 characters (the envelope limit), splits
+  long answers at sentence ends, and sends the parts in order with one `utterance` id and `part`/`parts`.
 - `bot` is the seat whose voice says it, so the call can show the right thread and the watch the right floor holder.
 - `priority`: `answer_now` jumps the queue (a person is waiting), `when_ready` is the default, `fyi` is dropped
-  first when a gateway floods the phone.
+  first when a gateway floods the phone, and nowhere before its time.
 - `call` binds the words to one call. Without it, any active call may say them. Hanging up does not replay them:
   they stay in the seat's thread.
-- `rev` / `expires_on_rev` bind the words to an intent revision. A later correction advances the revision and the
-  item is retired before it starts, or stopped after the sentence in progress if it already started.
+- `intent` / `rev` / `expires_on_rev` bind the words to an intent and its revision. A correction advances the
+  revision and re-emits the whole corrected text under the same `intent`; items bound to the old revision are
+  retired before they start, or stopped after the sentence in progress if they already started. What was heard is
+  not repeated: the client speaks only the remainder when the correction continues what it heard, and the whole
+  text after a cue when it rewrites it.
+- `expires` bounds a `fyi` item's life in seconds, so stale news is never said after the moment passed.
 
 `id` doubles as the dedupe key: ntfy can redeliver, and a message id already seen in the last 24 h is ignored
 (`PushGuard`), which is exactly the semantics the queue wants.
+
 
 ## 3. What the phone does with it
 
