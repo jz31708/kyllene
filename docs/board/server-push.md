@@ -140,3 +140,22 @@ saved to play), and a partial utterance can stop playback but never becomes a co
   call start reuses `phone_call`'s existing path. This is the first thing to land after the gateway produces items.
 - The ack is not sent yet; the type is defined so the transport can be chosen without changing keys.
 - The watch haptic lead is specified, not implemented.
+
+## 8. The next patch, file by file
+
+The shape we intend, in the order it should land (C4 owns the phone):
+
+| File | Change |
+|---|---|
+| `androidApp/.../push/PushListener.kt` | `PushMessage.SPEAK ->` parse `SpeakItem.from`, offer to the queue, then drain if a call is live; notify otherwise |
+| `androidApp/.../notify/SpeakNotifier.kt` (new) | the fallback notification: seat label, "2 of 3", an action that opens the seat's call |
+| `androidApp/.../notify/AudioFocusGate.kt` (new) | `GAIN_TRANSIENT_MAY_DUCK` per line; `LOSS_TRANSIENT` holds (navigation, phone call), `LOSS` holds and notifies |
+| `shared/ui/.../voice/VoiceController.kt` | `say(item)`: speak a line with the lease held, expose `playing`/`muted`/`hearing`, and a stop handle per item |
+| `shared/core/.../speak/SpeakQueueStore.kt` (new) | the queue across a process restart, keyed by gateway and profile, with `heard` positions |
+| `androidApp/.../service/VoiceCallService.kt` | own the queue's drain while a call is on, so a screen closing does not end the floor |
+| `shared/core/.../settings/SettingsStore.kt` | a `speakPushed` switch and quiet hours, off by default for `fyi` |
+
+Two deliberate limits for v1: pushed lines are verbatim only in the chained engine (GPT-Live has no output hold, so
+it gets the line as `commentary` and may paraphrase), and a line that arrives with no call is a notification, never
+surprise audio.
+
