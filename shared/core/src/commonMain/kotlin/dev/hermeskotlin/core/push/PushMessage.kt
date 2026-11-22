@@ -33,6 +33,14 @@ data class PushMessage(
     val notify: Boolean = false,
     /** When a [CRON_RUN] finished, unix seconds. */
     val at: Long? = null,
+    /** A [SPEAK]'s urgency: `answer_now`, `when_ready` (the default) or `fyi`. */
+    val priority: String? = null,
+    /** The call a [SPEAK] was queued for; absent means any call may say it. */
+    val call: String? = null,
+    /** The intent revision a [SPEAK] belongs to. */
+    val rev: Long? = null,
+    /** The revision past which a [SPEAK] is no longer true and must not start. */
+    @SerialName("expires_on_rev") val expiresOnRev: Long? = null,
 ) {
     companion object {
         // The types the phone acts on. The others in docs/push-protocol.md (approval, and the
@@ -51,6 +59,13 @@ data class PushMessage(
 
         /** A cron job the user follows finished a run ([job], [run], [status], [text] its start). */
         const val CRON_RUN = "cron_run"
+
+        /**
+         * A seat speaks out of turn ([text], [bot] the seat, [session], [priority], [call], [rev],
+         * [expiresOnRev]): a deferred answer or a result worth hearing. The phone queues it and says it when
+         * the floor allows (`docs/board/server-push.md`).
+         */
+        const val SPEAK = "speak"
 
         /** Gateway → phone messages are news; older than a day they're dropped. */
         const val MAX_AGE_G2P_SECONDS = 24 * 3600L
