@@ -13,10 +13,13 @@ class SpeakQueueTest {
         text: String = "The Lenovo queue is drained.",
         priority: SpeakPriority = SpeakPriority.WhenReady,
         call: String? = null,
+        intent: String? = null,
+        part: Int = 1,
         rev: Long? = null,
         expiresOnRev: Long? = null,
+        expires: Long? = null,
         at: Long = 1,
-    ) = SpeakItem(id, text, priority, call = call, rev = rev, expiresOnRev = expiresOnRev, at = at)
+    ) = SpeakItem(id, text, priority, call = call, intent = intent, part = part, rev = rev, expiresOnRev = expiresOnRev, expires = expires, at = at)
 
     private val floor = SpeakFloor(callActive = true)
 
@@ -42,11 +45,20 @@ class SpeakQueueTest {
     }
 
     @Test
-    fun `nothing is said without an active call, over the person, or without audio`() {
+    fun `the parts of one answer stay in order`() {
+        val queue = SpeakQueue()
+        queue.offer(item(id = "p2", part = 2, at = 2))
+        queue.offer(item(id = "p1", part = 1, at = 1))
+        assertEquals(listOf("p1", "p2"), queue.queued.map { it.id })
+    }
+
+    @Test
+    fun `nothing is said without an active call, over the person, over other speech, or without audio`() {
         val queue = SpeakQueue()
         queue.offer(item())
         assertNull(queue.next(SpeakFloor(callActive = false)))
         assertNull(queue.next(SpeakFloor(callActive = true, personSpeaking = true)))
+        assertNull(queue.next(SpeakFloor(callActive = true, busy = true)))
         assertNull(queue.next(SpeakFloor(callActive = true, audioFree = false)))
         assertEquals("s1", queue.next(floor)?.id)
     }
@@ -78,6 +90,15 @@ class SpeakQueueTest {
     }
 
     @Test
+    fun `an expired item is never started nor queued`() {
+        val queue = SpeakQueue()
+        queue.offer(item(expires = 100))
+        assertFalse(queue.offer(item(id = "late", expires = 50), now = 60))
+        assertNull(queue.next(floor, now = 100))
+        assertEquals("s1", queue.next(floor, now = 99)?.id)
+    }
+
+    @Test
     fun `a correction retires what it overtook and keeps what was heard`() {
         val queue = SpeakQueue()
         queue.offer(item(id = "old", expiresOnRev = 3, at = 1))
@@ -85,8 +106,8 @@ class SpeakQueueTest {
         assertEquals("old", queue.next(floor)?.id)
         queue.hear(11)
         val expired = queue.advanceTo(4)
-        // The playing item is not cut off mid-sentence here: finishing says how much was heard.
-        assertEquals("now", expired.single().id)
+        // The item playing is not cut off mid-sentence here: finishing says how much was heard.
+        assertEquals(listOf("now"), expired.map { it.id })
         val ack = queue.finished(SpeakOutcome.Stopped)
         assertEquals(11, ack?.heard)
         assertEquals(SpeakOutcome.Stopped, ack?.outcome)
@@ -97,6 +118,16 @@ class SpeakQueueTest {
         val queue = SpeakQueue()
         queue.advanceTo(9)
         assertFalse(queue.offer(item(expiresOnRev = 8)))
+    }
+
+    @Test
+    fun `a correction drops the rest of its own intent`() {
+        val queue = SpeakQueue()
+        queue.offer(item(id = "a", intent = "i1", part = 1, at = 1))
+        queue.offer(item(id = "b", intent = "i1", part = 2, at = 2))
+        queue.offer(item(id = "c", intent = "i2", at = 3))
+        assertEquals(listOf("a", "b"), queue.supersede("a").map { it.id })
+        assertEquals(listOf("c"), queue.queued.map { it.id })
     }
 
     @Test
@@ -139,12 +170,15 @@ class SpeakQueueTest {
         val message = PushMessage(
             id = "p1", ts = 1, type = PushMessage.SPEAK, bot = "board", label = "Board", session = "s-1",
             text = " Two decisions wait. ", priority = "answer_now", call = "c1", rev = 7, expiresOnRev = 7,
+            intent = "i-1", utterance = "u-1", part = 2, parts = 3,
         )
         val item = SpeakItem.from(message)
         assertEquals("Two decisions wait.", item?.text)
         assertEquals(SpeakPriority.AnswerNow, item?.priority)
         assertEquals("board", item?.seat)
         assertEquals("c1", item?.call)
+        assertEquals("i-1", item?.intent)
+        assertEquals("2 of 3", item?.place)
         assertEquals(7L, item?.expiresOnRev)
         assertNull(SpeakItem.from(message.copy(type = PushMessage.BOT_MESSAGE)))
         assertNull(SpeakItem.from(message.copy(text = " ")))
@@ -154,5 +188,15 @@ class SpeakQueueTest {
     fun `an unknown priority is said when ready`() {
         val message = PushMessage(id = "p1", ts = 1, type = PushMessage.SPEAK, text = "Hi", priority = "now-ish")
         assertEquals(SpeakPriority.WhenReady, SpeakItem.from(message)?.priority)
+    }
+
+    @Test
+    fun `a corrected answer only says what was not heard`() {
+        assertEquals("and the queue is empty.", SpeakText.remainder("Two decisions wait and the queue is empty.", "Two decisions wait"))
+        assertTrue(SpeakText.continues("Two decisions wait and the queue is empty.", "Two decisions wait"))
+        // A rewrite is said whole, after a cue.
+        assertEquals("Three decisions wait.", SpeakText.remainder("Three decisions wait.", "Two decisions wait"))
+        assertFalse(SpeakText.continues("Three decisions wait.", "Two decisions wait"))
+        assertEquals("Anything.", SpeakText.remainder("Anything.", ""))
     }
 }

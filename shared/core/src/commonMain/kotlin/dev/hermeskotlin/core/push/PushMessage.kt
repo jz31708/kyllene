@@ -41,6 +41,11 @@ data class PushMessage(
     val rev: Long? = null,
     /** The revision past which a [SPEAK] is no longer true and must not start. */
     @SerialName("expires_on_rev") val expiresOnRev: Long? = null,
+    /** A [SPEAK]'s intent, and the utterance that groups the parts of one answer; [part] of [parts]. */
+    val intent: String? = null,
+    val utterance: String? = null,
+    val part: Int = 1,
+    val parts: Int = 1,
 ) {
     companion object {
         // The types the phone acts on. The others in docs/push-protocol.md (approval, and the

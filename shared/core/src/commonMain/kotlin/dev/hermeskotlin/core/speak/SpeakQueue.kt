@@ -7,7 +7,7 @@ import dev.hermeskotlin.core.push.PushMessage
  * (`docs/board/server-push.md`). The seat chooses every word; the phone only decides when it is heard.
  */
 data class SpeakItem(
-    /** The push message's id: what makes a redelivered utterance a repeat rather than a second one. */
+    /** The push message's id: what makes a redelivered part a repeat rather than a second one. */
     val id: String,
     val text: String,
     val priority: SpeakPriority = SpeakPriority.WhenReady,
@@ -19,15 +19,29 @@ data class SpeakItem(
     val session: String? = null,
     /** The call the gateway bound this to; null means any active call may say it. */
     val call: String? = null,
+    /** The intent whose correction these words answer. Words of one intent never overlap. */
+    val intent: String? = null,
+    /** What the seat is answering, stable across the parts of one answer. */
+    val utterance: String? = null,
+    val part: Int = 1,
+    val parts: Int = 1,
     /** The intent revision the words belong to, when the gateway says. */
     val rev: Long? = null,
     /** Past this revision the words are no longer true and must not be started. */
     val expiresOnRev: Long? = null,
+    /** After this, unix seconds, the words are news rather than an answer. */
+    val expires: Long? = null,
     /** When the gateway queued it, unix seconds. */
     val at: Long = 0,
 ) {
     /** Whether a newer revision has overtaken these words. */
     fun staleAt(revision: Long?): Boolean = expiresOnRev != null && revision != null && expiresOnRev < revision
+
+    /** Whether the moment for these words has passed. */
+    fun expiredAt(now: Long?): Boolean = expires != null && now != null && expires <= now
+
+    /** Where this part sits in its answer, for the call screen ("2 of 3"). */
+    val place: String? get() = if (parts > 1) "$part of $parts" else null
 
     companion object {
         /** The utterance inside a `speak` push, or null for a message that isn't one the phone can say. */
@@ -43,8 +57,13 @@ data class SpeakItem(
                 label = message.label,
                 session = message.session,
                 call = message.call,
+                intent = message.intent,
+                utterance = message.utterance,
+                part = message.part.coerceAtLeast(1),
+                parts = message.parts.coerceAtLeast(1),
                 rev = message.rev,
                 expiresOnRev = message.expiresOnRev,
+                expires = message.expires,
                 at = message.ts,
             )
         }
@@ -72,18 +91,38 @@ enum class SpeakOutcome(val wire: String) {
 
 /**
  * Where the phone is, as the floor rules see it (`worktable-spec.md` §11.3): speech drains only while a call
- * is active, the person isn't speaking, and audio focus is the app's to take.
+ * is active, the owner isn't speaking, audio focus is the app's to take, and nothing else is talking.
  */
 data class SpeakFloor(
     val callActive: Boolean = false,
     val personSpeaking: Boolean = false,
     val audioFree: Boolean = true,
+    /** Something else of the app's is speaking (a read-aloud, another chat's reply). */
+    val busy: Boolean = false,
     /** The call's id, when the gateway gave the call one; items bound to another call wait. */
     val call: String? = null,
 )
 
 /** What happened to an utterance: [heard] characters were audible before it ended. */
-data class SpeakAck(val id: String, val heard: Int, val outcome: SpeakOutcome)
+data class SpeakAck(val id: String, val utterance: String?, val heard: Int, val outcome: SpeakOutcome)
+/**
+ * What of a corrected answer still needs saying. A correction usually repeats most of what was already heard,
+ * so only the rest is spoken; a rewrite is spoken whole, from its first difference, after a short cue.
+ */
+object SpeakText {
+    fun remainder(corrected: String, heard: String): String {
+        val said = heard.trimEnd()
+        if (said.isEmpty()) return corrected
+        if (corrected.startsWith(said)) return corrected.removePrefix(said).trimStart()
+        return corrected
+    }
+
+    /** Whether [corrected] only continues what was heard, so the rest can follow without a cue. */
+    fun continues(corrected: String, heard: String): Boolean {
+        val said = heard.trimEnd()
+        return said.isNotEmpty() && corrected.startsWith(said)
+    }
+}
 
 /**
  * The phone's end of the speak queue: what seats said out of turn waits here until the floor lets it play.
@@ -98,7 +137,7 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
     private var heard = 0
     private var revision: Long? = null
 
-    /** What is being said now, if anything, and how much of it has been heard. */
+    /** What is being said now, if anything. */
     val playing: SpeakItem? get() = speaking
 
     /** How many characters of [playing] have been audible. */
@@ -114,8 +153,9 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
      * Takes an utterance from the gateway (or from a seat's tool call). A repeat of one already queued, played
      * or overtaken by a newer revision is refused, and so is one that arrives after its own revision.
      */
-    fun offer(item: SpeakItem): Boolean {
+    fun offer(item: SpeakItem, now: Long? = null): Boolean {
         if (item.text.isBlank()) return false
+        if (item.expiredAt(now)) return false
         if (item.id in seen) return false
         if (item.staleAt(revision)) return false
         remember(item.id)
@@ -134,19 +174,34 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
      * Returns the acknowledgements for the items that never started.
      */
     fun advanceTo(revision: Long): List<SpeakAck> {
-        if (this.revision != null && revision <= this.revision!!) return emptyList()
+        val current = this.revision
+        if (current != null && revision <= current) return emptyList()
         this.revision = revision
         val retired = waiting.filter { it.staleAt(revision) }
         waiting.removeAll(retired)
-        return retired.map { SpeakAck(it.id, 0, SpeakOutcome.Expired) }
+        return retired.map { SpeakAck(it.id, it.utterance, 0, SpeakOutcome.Expired) }
+    }
+
+    /**
+     * A corrected answer that supersedes [id] within the same intent: drops whatever of that intent still
+     * waited. The caller speaks the remainder itself ([SpeakText.remainder]) once the correction is current.
+     */
+    fun supersede(id: String): List<SpeakAck> {
+        val previous = waiting.firstOrNull { it.id == id } ?: return emptyList()
+        val dropped = waiting.filter { it.intent != null && it.intent == previous.intent }.map {
+            SpeakAck(it.id, it.utterance, 0, SpeakOutcome.Expired)
+        }
+        waiting.removeAll { it.intent != null && it.intent == previous.intent }
+        return dropped
     }
 
     /** What should be said now, or null while the floor is someone else's. */
-    fun next(floor: SpeakFloor): SpeakItem? {
+    fun next(floor: SpeakFloor, now: Long? = null): SpeakItem? {
         if (speaking != null) return null
-        if (!floor.callActive || floor.personSpeaking || !floor.audioFree) return null
+        if (!floor.callActive || floor.personSpeaking || !floor.audioFree || floor.busy) return null
         val ready = waiting.sortedWith(ORDER).firstOrNull { item ->
-            !item.staleAt(revision) && (item.call == null || floor.call == null || item.call == floor.call)
+            !item.staleAt(revision) && !item.expiredAt(now) &&
+                (item.call == null || floor.call == null || item.call == floor.call)
         } ?: return null
         waiting.remove(ready)
         speaking = ready
@@ -156,25 +211,25 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
 
     /** Records how much of the playing item has been audible, up to a known character position. */
     fun hear(chars: Int) {
-        if (speaking == null) return
-        heard = chars.coerceIn(heard, speaking!!.text.length)
+        val item = speaking ?: return
+        heard = chars.coerceIn(heard, item.text.length)
     }
 
     /**
-     * Ends the playing item — it finished, the person stopped it, or the call ended — and says how much was
+     * Ends the playing item — it finished, the owner stopped it, or the call ended — and says how much was
      * heard so the gateway can keep a partly heard answer.
      */
     fun finished(outcome: SpeakOutcome = SpeakOutcome.Played): SpeakAck? {
         val item = speaking ?: return null
         speaking = null
-        val ack = SpeakAck(item.id, heard, outcome)
+        val ack = SpeakAck(item.id, item.utterance, heard, outcome)
         heard = 0
         return ack
     }
 
     /** Drops everything queued, for hanging up: unheard items stay in the seat's thread, not here. */
     fun clear(): List<SpeakAck> {
-        val dropped = waiting.map { SpeakAck(it.id, 0, SpeakOutcome.Expired) }
+        val dropped = waiting.map { SpeakAck(it.id, it.utterance, 0, SpeakOutcome.Expired) }
         waiting.clear()
         return dropped
     }
@@ -188,7 +243,7 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
         const val MAX_ITEMS = 8
         const val MAX_SEEN = 64
 
-        /** Answer now first; otherwise the order they arrived in. */
-        val ORDER: Comparator<SpeakItem> = compareBy({ it.priority.ordinal }, { it.at }, { it.id })
+        /** Answer now first; otherwise the order they arrived in, a part after the part before it. */
+        val ORDER: Comparator<SpeakItem> = compareBy({ it.priority.ordinal }, { it.at }, { it.part }, { it.id })
     }
 }
