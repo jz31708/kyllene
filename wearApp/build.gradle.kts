@@ -80,6 +80,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
+        // Pairs with "Kyllene Board" on the phone (androidApp's debug build): the same suffix, because the
+        // Data Layer only connects a watch app to the phone app whose package name is identical.
+        debug {
+            applicationIdSuffix = ".board"
+            versionNameSuffix = "-board"
+        }
     }
 }
 

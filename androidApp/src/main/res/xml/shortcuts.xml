@@ -2,7 +2,8 @@
 <!--
     Herald's fixed launcher shortcuts; each opens a hermes:// link (AppLink). Any dynamic shortcuts
     share the launcher's slots with these, so they must leave room for them.
-    The targetPackage is the installed app id, so the dev build has its own copy (src/dev/res/xml).
+    The targetPackage is the installed app id, so the dev build and the debug (Board) build have their own copy
+    (src/dev/res/xml, src/debug/res/xml).
 -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut

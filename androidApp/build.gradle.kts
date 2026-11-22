@@ -108,6 +108,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
+        // "Kyllene Board": the Board's debug build, which must install *beside* a released Kyllene. Its own
+        // application id keeps its data, sign-in and gateway pairing separate, and cannot replace Thomas's app.
+        // wearApp carries the same suffix, because the watch only pairs with the phone app of the same id.
+        debug {
+            applicationIdSuffix = ".board"
+            versionNameSuffix = "-board"
+        }
     }
 }
 
