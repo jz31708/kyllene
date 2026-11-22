@@ -7,6 +7,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Lets the device toolkit rebuild and reinstall the current master without an
+  # empty commit: `gh workflow run CI -R jz31708/kyllene`.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -83,6 +86,20 @@ jobs:
             androidApp/build/reports/lint-results-debug.html
             wearApp/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+
+      # The debug APKs are what the device toolkit installs on a real phone and
+      # watch (`phone install-latest jz31708/kyllene`). Uploaded even when a later
+      # check fails, so a red run still leaves something to try on hardware.
+      - name: Debug APKs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kyllene-debug
+          path: |
+            androidApp/build/outputs/apk/debug/*.apk
+            wearApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 14
 
   # The Pebble watchapp, built with Pebble's own tools. Installing the SDK only prints its terms
   # (https://developer.repebble.com/legal/sdk-license/), it asks nothing. The SDK is pinned like the tool: a newer
