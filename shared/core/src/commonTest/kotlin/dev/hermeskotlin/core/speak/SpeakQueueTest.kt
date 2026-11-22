@@ -79,6 +79,8 @@ class SpeakQueueTest {
         val queue = SpeakQueue()
         queue.offer(item(id = "s1", call = "call-b"))
         assertNull(queue.next(SpeakFloor(callActive = true, call = "call-a")))
+        // A phone that doesn't know which call it is on does not guess.
+        assertNull(queue.next(floor))
         assertEquals("s1", queue.next(SpeakFloor(callActive = true, call = "call-b"))?.id)
     }
 

@@ -105,6 +105,7 @@ data class SpeakFloor(
 
 /** What happened to an utterance: [heard] characters were audible before it ended. */
 data class SpeakAck(val id: String, val utterance: String?, val heard: Int, val outcome: SpeakOutcome)
+
 /**
  * What of a corrected answer still needs saying. A correction usually repeats most of what was already heard,
  * so only the rest is spoken; a rewrite is spoken whole, from its first difference, after a short cue.
@@ -201,7 +202,8 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
         if (!floor.callActive || floor.personSpeaking || !floor.audioFree || floor.busy) return null
         val ready = waiting.sortedWith(ORDER).firstOrNull { item ->
             !item.staleAt(revision) && !item.expiredAt(now) &&
-                (item.call == null || floor.call == null || item.call == floor.call)
+                // Words bound to a call wait for that call, and for a phone that knows which call it is on.
+                (item.call == null || item.call == floor.call)
         } ?: return null
         waiting.remove(ready)
         speaking = ready

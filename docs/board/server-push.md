@@ -117,9 +117,16 @@ Owner: the Voice chief (C4). The phone needs, in order of value:
 3. **TTS on the dashboard server.** The audio routes the phone uses (`/api/audio/transcribe`,
    `/api/audio/speak-stream`, `/api/audio/speak`, `/api/audio/voice-live/status`) exist on the dashboard
    (`hermes_cli/web_routers/audio.py`), not on the gateway API server on :8642, which answers 404 for all four.
-   Voxtral replaces Groq/Edge behind those routes; the phone needs no change for that.
-4. **The seat as a model id.** `t3-seat/board` and friends are model ids on the profile's provider list, so a call
-   can select one per chat, exactly as it selects any other model.
+   On this gateway both providers are already Mistral — `stt.provider: mistral` (`voxtral-mini-transcribe-3-0`)
+   and `tts.provider: mistral`, `voice.voice_chat_mode: chained` — so the phone needs no change for Voxtral; the
+   media path in §11.2 already runs end to end.
+4. **The seat as a model id.** `t3-seat/board` and friends must appear in `model.options` as provider `t3-seat`
+   with model `board`, so a call can select one per session, exactly as it selects any other model. No UI accepts
+   a raw provider/model pair, so a seat the gateway does not list cannot be typed in.
+5. **The push plugin on the phone's gateway.** `herald-push` is not installed on this gateway today (no plugin
+   directory), so "Notifications anywhere" has nothing to register with. Kyllene offers to install it from the
+   dashboard (`plugins.manage`, pinned commit), which is the one place the gateway changes because the phone asked.
+
 
 ## 6. Fallback
 
