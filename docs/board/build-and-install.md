@@ -24,20 +24,25 @@ Measured 22 November 2026:
 | Component | State |
 |---|---|
 | OS | Ubuntu 26.04.1, x86_64, 16 cores |
-| JDK | Temurin 21.0.13.1 at `~/jdk` (`JAVA_HOME` set); no system JDK |
-| Gradle | 9.8.0 via the wrapper; daemon JVM provisioned as JBR 25 |
-| Android SDK | `~/Android/Sdk`, with `platforms;android-37.1` and `build-tools;37.0.0` added |
-| Disk | 96% used, ~6.7 GB free — tight for a clean Compose build |
+| JDK | Temurin 21.0.13.1 at `~/jdk` (`JAVA_HOME` set) for the client; Gradle and Kotlin daemons on auto-provisioned **JBR 25** |
+| Gradle | 9.8.0 via the wrapper; AGP 9.5.0, Kotlin 2.4.20, KSP 2.3.12 |
+| Android SDK | `~/Android/Sdk`: platforms `android-36` and `android-37.1`, build-tools 36.0.0 and 37.0.0; adb 37.0.1 |
+| Disk | 97% used, ~5.6 GB free — enough for an incremental build, not for a clean checkout plus caches |
+| Builds | `:androidApp:assembleDebug` 2 m 25 s cold / 19 s warm; `:wearApp:assembleDebug` under a minute |
+| Tests | `:shared:core:testAndroidHostTest --tests dev.hermeskotlin.core.speak.SpeakQueueTest` — 19 tests, 0 failures |
 
 ```bash
 cd ~/repos/kyllene
-git fetch origin && git checkout board/voice-door
+git fetch origin && git checkout board/voice-door && git pull --ff-only
 ./gradlew :androidApp:assembleDebug          # the phone app
 ./gradlew :wearApp:assembleDebug             # the watch app
 ./gradlew :shared:core:testAndroidHostTest    # unit tests, including the speak queue
 ```
 
-APKs land in `androidApp/build/outputs/apk/debug/` and `wearApp/build/outputs/apk/debug/`.
+APKs land in `androidApp/build/outputs/apk/debug/androidApp-debug.apk` (about 60 MB) and
+`wearApp/build/outputs/apk/debug/wearApp-debug.apk` (about 64 MB), both V2-signed with the standard
+`CN=Android Debug` key. Keep long build logs in `~/logs`, not `/tmp`: `/tmp` is tmpfs on the Lenovo and a build
+log there does not survive a reboot (one did not, on 22 November).
 
 CI runs a longer list (`CONTRIBUTING.md`): every host-test module, `assembleDebug`, `assembleDev`, lint, and the
 watch app's tests. A patch is only "done" once that list passes somewhere with an SDK; nothing in the fork's docs
