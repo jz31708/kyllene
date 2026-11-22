@@ -38,3 +38,5 @@ Kept deliberately small, one idea per commit, so upstream merges stay cheap:
 1. `shared/core/.../push/PushMessage.kt`: the `speak` type and its fields.
 2. `shared/core/.../speak/SpeakQueue.kt`: the phone's queue — priority, floor, revision expiry, heard-up-to-N.
 3. `shared/core/src/commonTest/.../speak/SpeakQueueTest.kt`: the rules, as tests.
+4. `androidApp` / `wearApp` `build.gradle.kts`: the debug build is **Kyllene Board** (`dev.herald.android.board`,
+   same suffix on both sides so the watch still pairs) and installs beside the released app.

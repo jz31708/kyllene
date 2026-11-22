@@ -48,6 +48,23 @@ CI runs a longer list (`CONTRIBUTING.md`): every host-test module, `assembleDebu
 watch app's tests. A patch is only "done" once that list passes somewhere with an SDK; nothing in the fork's docs
 or queue logic needs a device.
 
+## Installing beside the real Kyllene
+
+Thomas already runs a released Kyllene. A debug APK is signed with the debug key, so it can never update a release
+install — and uninstalling the release would lose the gateway pairing and every chat. The Board build therefore has
+its own identity:
+
+| Build | applicationId | Launcher label |
+|---|---|---|
+| released Kyllene | `dev.herald.android` | Kyllene |
+| **Kyllene Board** (debug) | `dev.herald.android.board` | **Kyllene Board** |
+| Kyllene Dev (`dev` build type) | `dev.herald.android.dev` | Kyllene Dev |
+
+The **watch** debug build carries the same `.board` suffix. That is not cosmetic: the Wear Data Layer only connects
+a watch app to the phone app whose package name is identical, so both sides move together or the watch goes dumb.
+Their data, sign-in and gateway pairing are separate from the released app's, which is exactly what "side by side"
+has to mean.
+
 ## Installing to the Oppo and the watch
 
 Both install over wireless ADB from the Lenovo, so the phone and watch never leave the house and no cable is
@@ -56,8 +73,13 @@ needed after the first pairing.
 1. On the Oppo: Settings → About → tap Build number seven times; then Developer options → **Wireless debugging** on.
 2. Wireless debugging → **Pair device with pairing code** → note the IP:port and the six-digit code.
 3. On the Lenovo: `adb pair <ip:port>` then the code; afterwards `adb connect <ip>:<port-from-the-main-screen>`.
-4. `adb devices` shows the phone; `adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk`.
-5. Repeat 1–3 on the Pixel Watch (Developer options → Wireless debugging), then install the wear APK the same way.
+4. `adb devices` shows the phone. Before installing, read what is already there:
+   `adb shell dumpsys package dev.herald.android | grep -E 'versionName|versionCode'` — that is the release build,
+   which this install never touches.
+5. `adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk`, then
+   `adb shell pm list packages | grep -i herald` to see `dev.herald.android` and `dev.herald.android.board`
+   side by side.
+6. Repeat 1–3 on the Pixel Watch (Developer options → Wireless debugging), then install the wear APK the same way.
    Watch and phone must be built together: they share the `applicationId` and use split version codes.
 
 The pairing code is the only thing a human has to type, and it changes every time the pairing dialog is reopened,
