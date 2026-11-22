@@ -57,6 +57,17 @@ android {
     // As androidApp: WebRTC's native libraries stay compressed, so the watch app downloads smaller.
     packaging { jniLibs.useLegacyPackaging = true }
 
+    // A wrist-sized debug APK: with -PboardArm64, only the watch's own ABI is packaged, which is most of the
+    // download the wear app otherwise carries (WebRTC's four ABIs). Off by default, so normal builds are unchanged.
+    splits {
+        abi {
+            isEnable = project.hasProperty("boardArm64")
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
+        }
+    }
+
     lint {
         abortOnError = true
         warningsAsErrors = true
