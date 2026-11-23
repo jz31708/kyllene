@@ -221,6 +221,39 @@ class AndroidVoiceRecorderTest {
         assertEquals(1, released.get())
     }
 
+    /**
+     * Android reports a muted or withdrawn microphone as recording and hands it zeroes. Three seconds of nothing at
+     * all is a microphone that isn't there, not a quiet room, and the turn says so instead of listening for ever.
+     */
+    @Test fun digitalSilenceStopsTheTurnWithItsOwnFault() = runBlocking {
+        mode = "partial"
+        val failure = withTimeout(2_000) {
+            runCatching { AndroidVoiceRecorder(silentMicMs = 100).record(VoiceActivity(idleMs = 0, maxMs = 5_000)) }.exceptionOrNull()
+        }
+        assertIs<MicrophoneSilent>(failure)
+        assertEquals(1, released.get())
+    }
+
+    /** A quiet room has a floor; only pure zeroes count, so a very quiet recording still ends as a recording. */
+    @Test fun aQuietMicrophoneIsNotSilent() = runBlocking {
+        mode = "hush"
+        val audio = withTimeout(2_000) { AndroidVoiceRecorder(silentMicMs = 100).record(VoiceActivity(idleMs = 0, maxMs = 400)) }
+        assertEquals(44 + 12_800, audio.bytes.size)
+    }
+
+    /** The recorder's own fault reaches the chat as the state that says it, rather than as an error that ends it. */
+    @Test fun aSilentMicrophoneShowsTheBlockedStateRatherThanEndingTheCall() =
+        controller(AndroidVoiceRecorder(silentMicMs = 100)) { voice, session ->
+        mode = "partial"
+        // A pause longer than the watchdog, so what stops the turn is the silence and not the end of speech.
+        voice.startChat(session, gateway, null, pauseMs = 5_000)
+        withTimeout(4_000) { voice.chat.first { it.phase == VoicePhase.Blocked } }
+        assertEquals(MicrophoneBlock.Silence, voice.chat.value.blocked)
+        // End still puts the screen back, and nothing was sent.
+        voice.stopChat()
+        withTimeout(2_000) { voice.chat.first { it.phase == VoicePhase.Off } }
+    }
+
     private fun checkPcm(source: String) = runBlocking {
         mode = source
         val audio = withTimeout(2_000) { AndroidVoiceRecorder().record(VoiceActivity(idleMs = 0, maxMs = 400)) }
@@ -234,7 +267,10 @@ class AndroidVoiceRecorderTest {
         assertTrue(withContext(Dispatchers.IO) { entered.await(2, TimeUnit.SECONDS) })
     }
 
-    private fun controller(test: suspend (VoiceController, ChatSession) -> Unit) = runBlocking {
+    private fun controller(
+        recorder: VoiceRecorder = AndroidVoiceRecorder(),
+        test: suspend (VoiceController, ChatSession) -> Unit,
+    ) = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val requests = AtomicInteger()
         val cookies = PersistentCookiesStorage(InMemoryKeyValueStore())
@@ -244,7 +280,7 @@ class AndroidVoiceRecorderTest {
         }, cookies)
         val connection = GatewayConnection(AuthApi(http, cookies), { _, _ -> error("Not connecting") }, scope)
         val session = ChatSession(gateway, null, null, connection, SessionsApi(http), scope)
-        val voice = VoiceController(AudioApi(http), AndroidVoiceRecorder(), object : SpeechPlayer {
+        val voice = VoiceController(AudioApi(http), recorder, object : SpeechPlayer {
             override suspend fun play(audio: SpokenAudio) = Unit
         }, scope, scope)
         try {
@@ -281,6 +317,11 @@ class AndroidVoiceRecorderTest {
             if (mode == "error") return AudioRecord.ERROR_DEAD_OBJECT
             if (mode == "invalid") return AudioRecord.ERROR_INVALID_OPERATION
             if (mode == "empty" || mode == "zero" || mode == "gapped" && attempt % 2 == 1) return 0
+            // A quiet room's floor: nearly nothing, but not the exact zeroes a muted microphone sends.
+            if (mode == "hush") {
+                for (i in offset until offset + count) data[i] = if (i % 2 == 0) 1 else -1
+                return count
+            }
             val size = if (mode == "partial") 1 else count
             data.fill(0, offset, offset + size)
             return size

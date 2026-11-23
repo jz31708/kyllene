@@ -56,5 +56,12 @@ when Thomas turns wireless debugging on.
    toggles the **phone's** mic (the watch must not light its own microphone indicator); a quick note shows
    "saved". The floor holder is the seat currently speaking.
 6. **Hang up.** Unheard lines do not play after the call; they stay in the seat's thread.
+7. **A microphone that can't hear says so.** Start a Board voice call, then take the microphone away while the
+   call is up — revoke it in Settings (a one-time grant expires the same way), or mute the app from the
+   microphone quick-settings tile. The call must stop looking as though it were listening within three seconds:
+   "Microphone blocked" with Open settings, or "Can't hear you, check the microphone" with Try again. Nothing
+   may be sent, and `adb logcat -s WT-MIC` on the phone must show `blocked=...` (and `blocked=permission at=start`
+   if the permission is gone before the tap). Grant it again in Settings and come back: the call listens again
+   without a second tap.
 
 Record which of these were real-device results and which were only rehearsal.
