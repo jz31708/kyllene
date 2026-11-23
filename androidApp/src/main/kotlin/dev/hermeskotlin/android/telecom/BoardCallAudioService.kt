@@ -124,6 +124,10 @@ class BoardCallAudioService : Service() {
             TelecomSpike.log("probe: recording=${record.recordingState == AudioRecord.RECORDSTATE_RECORDING}")
             while (currentCoroutineContext().isActive && elapsed < MAX_MS) {
                 val filled = readFrame(record, frame)
+                if (filled == STARVED) {
+                    TelecomSpike.log("probe: the microphone stopped answering (a second of no data)")
+                    return
+                }
                 if (filled < 0) {
                     TelecomSpike.log("probe: read error=$filled")
                     return
@@ -159,7 +163,7 @@ class BoardCallAudioService : Service() {
         }
     }
 
-    /** Fills one 20 ms frame; -1 on a read error, 0 when the microphone stopped answering. */
+    /** Fills one 20 ms frame; a negative read code, or [STARVED] when the microphone stopped answering. */
     private suspend fun readFrame(record: AudioRecord, frame: ShortArray): Int {
         var filled = 0
         var idleTries = 0
@@ -170,7 +174,7 @@ class BoardCallAudioService : Service() {
                 read < 0 -> return read
                 read == 0 -> {
                     // A microphone that isn't answering at all: a second of nothing is a finding, not a wait.
-                    if (++idleTries > 100) return -1
+                    if (++idleTries > 100) return STARVED
                     delay(10)
                 }
                 else -> {
@@ -198,6 +202,9 @@ class BoardCallAudioService : Service() {
         private const val FRAME_MS = 20L
         private const val LOG_EVERY_MS = 1_000L
         private const val MAX_MS = 30 * 60_000L
+
+        /** Not a read error code: the microphone answered nothing for a second. */
+        private const val STARVED = -1_000
         private const val NOTIFICATION_ID = 4_121
         private const val CHANNEL = "board_call_spike"
         private const val ACTION_STOP = "dev.hermeskotlin.board.CALL_SPIKE_STOP"
