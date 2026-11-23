@@ -53,6 +53,7 @@ class WearBridgeService : WearableListenerService() {
     private val board: BoardSync by inject()
     private val notes: BoardNotes by inject()
     private val boardCalls: BoardCalls by inject()
+    private val boardTiles: BoardTiles by inject()
 
     override fun onMessageReceived(event: MessageEvent) {
         val node = event.sourceNodeId
@@ -87,8 +88,9 @@ class WearBridgeService : WearableListenerService() {
                     relay.status(node, request?.botProfile, request?.requestId, request?.scope, accent.updateFor(request?.accentRevision))
                 }
             }
-            // The watch asking for the tiles it already keeps: the answer's round trip is the clock anchor.
-            WearPaths.TILES -> board.requested(node)
+            // The watch asking for the tiles it already keeps: the answer's round trip is the clock anchor. The
+            // phone re-reads its call first, so a wrist that just opened shows the call as it is, not as it was.
+            WearPaths.TILES -> boardTiles.republish().also { board.requested(node) }
             // A quick note, or a mic toggle when it has no words. The watch never sends audio for the Board.
             WearPaths.BOARD_NOTES -> WearJson.decode<QuickNote>(event.data)?.let { note ->
                 scope.launch { board.noteSaved(node, notes.receive(note), micAction = note.text.isBlank()) }

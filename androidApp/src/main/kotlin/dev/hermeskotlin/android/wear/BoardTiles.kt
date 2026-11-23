@@ -40,6 +40,9 @@ class BoardTiles(
         }
     }
 
+    /** The wrist asked: publish the call as it stands now, never an older copy of it. */
+    fun republish() = publish(BoardCallBus.state.value)
+
     private fun publish(snapshot: BoardCallSnapshot) {
         // The phone can open its call again: the wrist's "Open Oppo to record" line goes with the next publish.
         if (snapshot.active) calls.opened()
