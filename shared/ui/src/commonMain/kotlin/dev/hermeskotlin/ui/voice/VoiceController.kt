@@ -177,20 +177,6 @@ class VoiceController(
     /** The chat was ended by one started on another screen ([VoiceChats.endOthers]), which its panel says. */
     private var endedElsewhere = false
 
-    init {
-        // A voice chat started on another screen takes the microphone and the speaker from this one's dictation and
-        // Read aloud too. Told for as long as this controller's scope lives.
-        val quiet = VoiceChats.quietWith(this) {
-            cancelDictation()
-            stopReading()
-        }
-        scope.coroutineContext[Job]?.invokeOnCompletion {
-            quiet()
-            BoardCallBus.publish(BoardCallSnapshot())
-        }
-        // The watch shows what the call is doing; it never derives it from captions.
-        scope.launch { _chat.collect { publishBoard() } }
-    }
     private var speechJob: Job? = null
     /** Where the open chained call sends a pushed line, and in whose voice (set while [chained] is). */
     private var callGateway: GatewayUrl? = null
@@ -251,6 +237,23 @@ class VoiceController(
     /** The chained chat running, whose microphone Mute holds shut; null outside one. */
     private var chained: Job? = null
     private var chainedAudio: (() -> Unit)? = null
+
+    // Last in the constructor's work, after every field above exists: the collector can run inline when the scope
+    // dispatches on the current thread (Main.immediate on Android), so [publishBoard] must not find a field null.
+    init {
+        // A voice chat started on another screen takes the microphone and the speaker from this one's dictation and
+        // Read aloud too. Told for as long as this controller's scope lives.
+        val quiet = VoiceChats.quietWith(this) {
+            cancelDictation()
+            stopReading()
+        }
+        scope.coroutineContext[Job]?.invokeOnCompletion {
+            quiet()
+            BoardCallBus.publish(BoardCallSnapshot())
+        }
+        // The watch shows what the call is doing; it never derives it from captions.
+        scope.launch { _chat.collect { publishBoard() } }
+    }
 
     /**
      * [pauseMs] is how long a quiet spell after speech has to last before it's sent. [opener]: a call the agent placed,

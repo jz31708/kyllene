@@ -31,9 +31,12 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
@@ -128,6 +131,20 @@ class VoiceControllerTest {
             PersistentCookiesStorage(InMemoryKeyValueStore()),
         ),
     )
+
+    /**
+     * Android's Main.immediate runs `init`'s collector inside the constructor, so every field it can read must exist
+     * already: the Board launch crashed at `VoiceController.<init>` reading a StateFlow declared below the `init`.
+     */
+    @Test
+    fun constructingOnAnInlineDispatcherReadsOnlyInitialisedState() = runTest {
+        val inline = CoroutineScope(Dispatchers.Unconfined + Job())
+        val voice = VoiceController(audio("unused", Requests()), FakeRecorder(), FakePlayer(), inline, inline)
+
+        assertEquals(VoicePhase.Off, voice.chat.value.phase)
+        assertEquals(DictationState(), voice.dictation.value)
+        inline.cancel()
+    }
 
     @Test
     fun dictationPutsTheTranscriptInTheComposer() = runTest {

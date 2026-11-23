@@ -172,6 +172,10 @@ class RoomsViewModel(
     /** The last room asked for (name and roster) without an answer back, with the id it was asked under. */
     private var unansweredCreate: Pair<Pair<String, List<RoomMemberInput>>, String>? = null
 
+    /** Each room's seen seq on the bound gateway ([RoomSeenStore]); declared before [init]'s collectors, which can run
+     *  inline on the main thread and would otherwise write a field that the initializer resets afterwards. */
+    private var seenSeqs: Map<String, Int> = emptyMap()
+
     init {
         // While the sidebar and the connection are live: read the rooms, then slowly besides.
         viewModelScope.launch {
@@ -193,9 +197,7 @@ class RoomsViewModel(
         }
     }
 
-    /** Each room's seen seq on the bound gateway ([RoomSeenStore]). */
-    private var seenSeqs: Map<String, Int> = emptyMap()
-
+    /** Unread as the rooms and what the user has seen say. */
     private fun RoomsUiState.withUnread() = copy(unread = rooms.filter { it.isUnread(seenSeqs) }.map { it.roomId }.toSet())
 
     /**
