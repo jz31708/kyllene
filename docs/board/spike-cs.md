@@ -46,8 +46,8 @@ PHONE=$($A devices | awk '/192\.168\.1\./ && !/192\.168\.1\.10/ {print $1; exit}
 WATCH=$($A devices | awk '/192\.168\.1\.10/ {print $1; exit}')
 
 # 1. The build, and what it is.
-$A -s "$PHONE" install -r ~/apk/spike-cs/androidApp-board.apk
-$A -s "$WATCH" install -r ~/apk/spike-cs/wearApp-board.apk
+$A -s "$PHONE" install -r /home/hermes/apk/spike-cs/androidApp-board.apk
+$A -s "$WATCH" install -r /home/hermes/apk/spike-cs/wearApp-board.apk
 
 # 2. Clear the log, put the phone out of sight and lock it.
 $A -s "$PHONE" logcat -c
