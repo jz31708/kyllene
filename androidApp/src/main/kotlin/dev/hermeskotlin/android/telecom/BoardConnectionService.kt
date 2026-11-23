@@ -55,8 +55,12 @@ class BoardConnectionService : ConnectionService() {
             setRinging()
         }
         TelecomSpike.log("connection: created reason=$reason state=${call.state}")
-        // The measurement: a phoneCall|microphone service started from here, with the phone in a pocket.
-        BoardCallAudioService.start(applicationContext, reason)
+        // The measurement: a phoneCall|microphone service started from here, with the phone in a pocket. If Android
+        // refuses the start outright, the microphone is still tried for five seconds — that separates "no
+        // microphone in this state" from "no foreground service in this state".
+        if (!BoardCallAudioService.start(applicationContext, reason)) {
+            MicSniff.sniff("the probe's service was refused, so the connection has no foreground service")
+        }
         // Nothing answers a call nobody can see: the spike ends it rather than leaving a ringing call on the phone.
         call.autoEndAfter(60_000L)
         return call

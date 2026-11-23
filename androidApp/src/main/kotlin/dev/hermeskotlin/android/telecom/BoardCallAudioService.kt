@@ -211,14 +211,19 @@ class BoardCallAudioService : Service() {
 
         @Volatile private var instance: BoardCallAudioService? = null
 
-        /** Starts the probe from the call's own connection: a background start, which is the point. */
-        fun start(context: Context, reason: String) {
+        /**
+         * Starts the probe from the call's own connection: a background start, which is the point.
+         * @return false when Android refused to start it at all, so the caller can try the microphone directly.
+         */
+        fun start(context: Context, reason: String): Boolean {
             val intent = Intent(context, BoardCallAudioService::class.java).putExtra(TelecomSpike.EXTRA_REASON, reason)
-            runCatching {
+            return runCatching {
                 ContextCompat.startForegroundService(context, intent)
                 TelecomSpike.log("probe: starting from the connection reason=$reason")
-            }.onFailure {
+                true
+            }.getOrElse {
                 TelecomSpike.log("probe: couldn't start ${it.javaClass.simpleName}: ${it.message}")
+                false
             }
         }
 

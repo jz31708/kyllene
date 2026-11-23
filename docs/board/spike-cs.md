@@ -12,6 +12,7 @@ wired into the shipped call path.
 | `TelecomSpike` (`android/telecom/TelecomSpike.kt`) | Registers a `PhoneAccount` with `CAPABILITY_SELF_MANAGED` (as `com.hermeskotlin.android.telecom`), logs the registration, and reports an incoming call on it. |
 | `BoardConnectionService` | `ConnectionService` behind that account; the connection is self-managed, rings, and logs every system callback: answer, reject, disconnect, abort, hold, mute, audio state, and `onShowIncomingCallUi`. |
 | `BoardCallAudioService` | A `phoneCall\|microphone` foreground service with a `CallStyle` notification, started **from the connection** (a background start) that opens `AudioRecord` and logs the level once a second. |
+| `MicSniff` | If Android refuses that start, five seconds of `AudioRecord` from the connection with no foreground service behind it — which separates "no microphone in this state" from "no foreground service in this state". |
 | `BoardCalls.start()` | When Kyllene is out of sight (the case under study) the wrist's ask is reported to telecom; in sight, the app's own way in is untouched. |
 | `HermesApplication` | Registers the account at start. |
 
@@ -23,7 +24,9 @@ Everything is `adb logcat -s WT-CS` on the phone. The tag is kept for the spike 
    actually record?**
    - `incoming: place reason=watch` → `incoming: placed` (telecom accepted it) or `incoming: refused …`.
    - `connection: created` → `probe: foreground started types=…` (`phoneCall|microphone`) or
-     `probe: startForeground threw SecurityException` — the answer to "may we hold a microphone from here".
+     `probe: startForeground threw SecurityException` / `probe: couldn't start ForegroundServiceStartNotAllowedException`
+     — the answer to "may we hold a microphone from here". Under that, `sniff: done no-foreground … nonZero=0` says
+     the microphone itself is shut, not just the service.
    - `probe: first sound at …ms` with a level above zero, or a run of `probe: …ms of exact zeroes`.
 2. **Do the system's call controls on the watch (mute, end) drive it, and could they replace `WT-REMOTE`?**
    - `call: mute=true|false from the system's UI`, `call: disconnect from the system's UI`,
