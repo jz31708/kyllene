@@ -11,10 +11,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,6 +54,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +100,11 @@ import androidx.wear.compose.material3.timeTextSeparator
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import dev.hermeskotlin.wear.board.HapticPattern
+import dev.hermeskotlin.wear.board.RingColor
+import dev.hermeskotlin.wear.board.WearPhase
+import dev.hermeskotlin.wear.board.WearStateMachine
+import dev.hermeskotlin.wear.board.WatchHaptics
 import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.ReplyPhase
 import dev.hermeskotlin.wearlink.TilesState
@@ -946,6 +958,167 @@ fun BoardNoteScreen(
         }
     }
 }
+
+/**
+ * The Board's call, opened from its tile: the Worktable watch's four-colour ring, ported — blue ready, red
+ * recording, amber swarm, green call — with its exact words, and the same rule: only the phone's own ack turns
+ * the ring red. The Oppo records; a tap here asks the phone for the call, the mic button toggles the phone's
+ * microphone, and a phone that can't take the call says "Open Oppo to record".
+ */
+@Composable
+fun BoardCallScreen(
+    board: BoardState?,
+    tiles: TilesState?,
+    note: NoteState?,
+    problem: String?,
+    phone: PhoneState,
+    onMic: () -> Unit,
+    onStart: () -> Unit,
+    onEnd: () -> Unit,
+) {
+    val tile = tiles?.tile(BOARD_TILE)
+    val call = board?.call
+    val active = call?.active == true
+    val floor = board?.floor?.let { id -> board.seats.firstOrNull { it.id == id }?.label ?: id }
+    val machine = remember { WearStateMachine() }
+    val context = LocalContext.current
+    val haptics = remember(context) { WatchHaptics(context) }
+    var lastPhase by remember { mutableStateOf<WearPhase?>(null) }
+    LaunchedEffect(call, phone) {
+        machine.applyPhone(call?.copy(connected = call.connected && phone == PhoneState.Ready))
+    }
+    val ring = machine.current
+    // The grammar's two answers the wrist feels: the phone opened its mic, or it let go.
+    LaunchedEffect(ring.phase) {
+        if (lastPhase != null && lastPhase != ring.phase) {
+            when (ring.phase) {
+                WearPhase.RECORDING -> haptics.play(HapticPattern.MIC_OPEN)
+                WearPhase.READY, WearPhase.CALL -> if (lastPhase == WearPhase.RECORDING) haptics.play(HapticPattern.SENT)
+                else -> Unit
+            }
+        }
+        lastPhase = ring.phase
+    }
+    // The phone's own line first, then what the call is doing: the floor, where it plays, or the fallback.
+    val line: String = problem
+        ?: floor?.let { stringResource(R.string.wear_board_floor, it) }
+        ?: call?.route
+        ?: tile?.detail
+        ?: ring.fallbackBanner
+        ?: ring.detail
+    val noteLine = when (note?.stage) {
+        NoteStage.Sending -> stringResource(R.string.wear_note_saving)
+        NoteStage.Saved -> if (note.text.isBlank()) stringResource(R.string.wear_mic_toggled) else stringResource(R.string.wear_note_saved)
+        NoteStage.Failed -> note.detail ?: stringResource(R.string.wear_note_failed)
+        null -> stringResource(R.string.wear_mic_toggle_hint)
+    }
+    val listState = rememberTransformingLazyColumnState()
+    ScreenScaffold(scrollState = listState, modifier = Modifier.halo(OrbMood.Idle, Color(ring.ringColor.argb))) { contentPadding ->
+        TransformingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+            item {
+                BoardRing(
+                    phase = ring.phase,
+                    onTap = {
+                        // The ring's tap is this screen's one action: take the call on the phone, or talk.
+                        machine.onTapQueued()
+                        if (active) onMic() else onStart()
+                    },
+                )
+            }
+            item {
+                Text(
+                    call?.label ?: tile?.title ?: stringResource(R.string.wear_board_tile_default),
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    style = geist(15, FontWeight.SemiBold),
+                    textAlign = TextAlign.Center,
+                )
+            }
+            item {
+                Text(
+                    line,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+                    style = geist(11, color = if (problem != null || ring.fallbackBanner != null) Danger else Muted),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item {
+                Button(
+                    onClick = onMic,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Text1, secondaryContentColor = Muted),
+                    label = { Text(stringResource(R.string.wear_mic), style = geist(14, FontWeight.Medium), maxLines = 1) },
+                    secondaryLabel = { Text(noteLine, style = geist(11, color = Text2), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+            }
+            item {
+                Button(
+                    onClick = if (active) onEnd else onStart,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                    label = {
+                        Text(
+                            stringResource(if (active) R.string.wear_end_call else R.string.wear_start_call),
+                            style = geist(15, FontWeight.Medium),
+                            maxLines = 1,
+                        )
+                    },
+                    secondaryLabel = {
+                        Text(
+                            stringResource(R.string.wear_board_call_on_phone),
+                            style = geist(11, color = MaterialTheme.colorScheme.onPrimaryContainer),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The four-segment ring, as `TapRingView` draws it: every palette colour faintly, the active one full. The inner
+ * 80% is the tap target, so the ring is decoration over a plain tap, never a missed target.
+ */
+@Composable
+private fun BoardRing(phase: WearPhase, onTap: () -> Unit) {
+    val colours = RingColor.entries
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(0.78f)
+            .aspectRatio(1f)
+            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = size.minDimension * 0.10f
+            val inset = stroke / 2 + 1.dp.toPx()
+            val arc = Size(size.width - inset * 2, size.height - inset * 2)
+            colours.forEachIndexed { index, colour ->
+                val on = colour == phase.ring
+                drawArc(
+                    color = Color(colour.argb).copy(alpha = if (on) 1f else 0.20f),
+                    startAngle = -90f + index * 90f + SEGMENT_GAP,
+                    sweepAngle = 90f - SEGMENT_GAP * 2,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arc,
+                    style = Stroke(width = if (on) stroke else stroke * 0.5f, cap = StrokeCap.Round),
+                )
+            }
+        }
+        Text(
+            phase.label,
+            style = geist(15, FontWeight.SemiBold, Color(phase.ring.argb)),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** Degrees left blank between the ring's four segments. */
+private const val SEGMENT_GAP = 6f
 
 /** The Board's state word in the watch's language; an unrecognised one is shown as the phone sent it. */
 @Composable

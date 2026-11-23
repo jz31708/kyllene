@@ -6,6 +6,7 @@ import androidx.wear.tiles.TileService
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
+import dev.hermeskotlin.wearlink.BoardCallRequest
 import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.CALL_EVENT_TYPES
 import dev.hermeskotlin.wearlink.InOrder
@@ -181,6 +182,10 @@ class WatchLink(
     val note: StateFlow<NoteState?> = _note.asStateFlow()
     private var noteWatchdog: Job? = null
 
+    /** Why the wrist's last start or stop of the phone's Board call didn't reach the phone; null otherwise. */
+    private val _boardCallProblem = MutableStateFlow<String?>(null)
+    val boardCallProblem: StateFlow<String?> = _boardCallProblem.asStateFlow()
+
     /** The phone's clock against this one, told by the round trips the tiles and status replies make. */
     internal val boardClock = BoardClock()
     private var tilesAskedAt: Long? = null
@@ -323,6 +328,23 @@ class WatchLink(
      * whole of the mic toggle, a note with no words.
      */
     fun togglePhoneMic() = note(QuickNote(UUID.randomUUID().toString(), boardId = store.board?.boardId))
+
+    /**
+     * Asks the phone for its Board call: the Oppo opens its microphone and speaker, and the watch only shows
+     * what the phone reports back. Sent on the tile's tap.
+     */
+    fun startBoardCall() = askBoardCall(BoardCallRequest.start(UUID.randomUUID().toString(), store.board?.boardId))
+
+    /** Hangs up the phone's Board call from the wrist. */
+    fun stopBoardCall() = askBoardCall(BoardCallRequest.stop(UUID.randomUUID().toString(), store.board?.boardId))
+
+    /** The call screen is opening afresh: its last failure is no longer news. */
+    fun clearBoardCallProblem() = _boardCallProblem.update { null }
+
+    private fun askBoardCall(request: BoardCallRequest) {
+        _boardCallProblem.update { null }
+        scope.launch(main) { send(WearPaths.BOARD_CALL, WearJson.encode(request))?.let { failure -> _boardCallProblem.update { failure } } }
+    }
 
     private fun note(request: QuickNote) {
         _note.value = NoteState(request.id, NoteStage.Sending, request.text)

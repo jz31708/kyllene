@@ -1145,6 +1145,9 @@ class VoiceController(
     /** The watch's mic button: it toggles this call's microphone, on the phone. */
     override fun toggleMic() = toggleMute()
 
+    /** The watch's hang up: this call ends here, as the phone's own End call does. */
+    override fun hangUp() = stopChat()
+
     /**
      * Says a line a seat pushed while this chained call is open, verbatim, in the call's voice. It is the
      * same path a reply takes (gateway TTS, the same player), and it is [speechJob], so barge-in, Skip and

@@ -39,7 +39,9 @@ val wearModule = module {
             )
         })
     }
-    single(createdAtStart = true) { BoardTiles(get(), get(), get()).also { it.start() } }
+    // The wrist's start and stop of the phone's Board call.
+    single { BoardCalls(androidContext(), get()) }
+    single(createdAtStart = true) { BoardTiles(get(), get(), get(), get()).also { it.start() } }
     single(createdAtStart = true) { WatchProfileNotifier(androidContext(), get(), get(), get()).also { it.start() } }
     single { WatchRinger(androidContext(), get(), get(), get(), get(), get()) }
     single { WatchAccentSync(androidContext(), get(), get()) }

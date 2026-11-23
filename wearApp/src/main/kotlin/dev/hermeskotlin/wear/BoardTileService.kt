@@ -10,9 +10,10 @@ import dev.hermeskotlin.wear.tiles.CallTileService
 import dev.hermeskotlin.wear.tiles.TileChip
 
 /**
- * The "Board" tile: the Board's state word and who holds the floor, in that seat's colour. A tap opens the call
- * screen; "Note" opens the little note screen, which dictates a quick note or toggles the phone's mic — the watch
- * itself never opens a microphone for the Board. "Ask" turns the tile over to two canned asks.
+ * The "Board" tile: the Board's state word and who holds the floor, in that seat's colour. A tap opens the Board's
+ * call screen, which asks the **phone** to open its call — the Oppo records, the watch shows and toggles; "Note"
+ * opens the little note screen, which dictates a quick note or toggles the phone's mic. Neither opens a microphone
+ * on the watch. "Ask" turns the tile over to two canned asks.
  */
 class BoardTileService : CallTileService() {
 
@@ -47,12 +48,14 @@ class BoardTileService : CallTileService() {
             title = tile?.title ?: getString(R.string.wear_board_tile_default),
             state = stateWord(this, tile?.state ?: "idle"),
             detail = detail,
-            onClick = launch(MainActivity::class.java, MainActivity.EXTRA_CALL),
-            chips = listOf(
+            onClick = launch(BoardCallActivity::class.java, BoardCallActivity.EXTRA_START),
+            // The Board's watch is a remote: no note screen to dictate on, and no canned asks to send from the
+            // wrist. Every control here is a command to the phone, which records.
+            chips = if (BuildConfig.BOARD_REMOTE) emptyList() else listOf(
                 TileChip("note", getString(R.string.wear_note), launch(NoteActivity::class.java)),
                 TileChip(ASKS_CHIP, getString(R.string.wear_tile_ask), reload()),
             ),
-            asks = if (asking(request)) cannedAsks() else emptyList(),
+            asks = if (!BuildConfig.BOARD_REMOTE && asking(request)) cannedAsks() else emptyList(),
             fill = floorColor ?: accents?.fill ?: HERALD_BLUE,
             onFill = if (floorColor != null) WHITE else accents?.onFill ?: WHITE,
         )

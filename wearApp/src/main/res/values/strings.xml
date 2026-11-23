@@ -132,6 +132,9 @@
     <string name="wear_mic_toggled">Phone mic toggled</string>
     <string name="wear_note_failed">The note wasn’t saved.</string>
     <string name="wear_note_no_speech">This watch has no speech input for notes.</string>
+    <!-- The Board's call, held by the phone: the watch asks and shows, the Oppo records -->
+    <string name="wear_board_call_on_phone">On your phone</string>
+    <string name="wear_open_phone_to_record">Open Kyllene on your phone to record.</string>
 
     <!-- Settings -->
     <string name="wear_talk_live">Talk live</string>

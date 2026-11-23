@@ -28,6 +28,10 @@ android {
         // androidApp's code plus a million: Play takes each version code once per app, across phone and watch.
         versionCode = 1_000_000 + major * 10_000 + minor * 100 + patch
         versionName = appVersion
+        // The upstream watch is a microphone. The Board's is not: its build is a remote for the phone, which
+        // records. The flag turns the talk, dictation and watch-held call paths off at compile time (R8 then
+        // drops them), and the board manifest asks for no microphone permission at all.
+        buildConfigField("boolean", "BOARD_REMOTE", "false")
     }
 
     val keystore = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
@@ -106,9 +110,50 @@ android {
             versionNameSuffix = "-board"
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "BOARD_REMOTE", "true")
         }
     }
 }
+
+/**
+ * The README's hard invariants, as a build check (from `agent-config/mobile/wear`): the Board's watch is never
+ * standalone and never the microphone. A board APK that asks for RECORD_AUDIO fails here, so it can't ship.
+ */
+val verifyBoardWatchInvariants by tasks.registering {
+    description = "Checks the Board's watch APK for zero RECORD_AUDIO and standalone=false."
+    group = "verification"
+    val apk = layout.buildDirectory.file("outputs/apk/board/wearApp-board.apk")
+    val sdk = androidComponents.sdkComponents.sdkDirectory
+    doLast {
+        val file = apk.get().asFile
+        check(file.exists()) { "The Board's watch APK wasn't built: $file" }
+        val aapt2 = sdk.get().asFile.resolve("build-tools").listFiles().orEmpty()
+            .filter { it.isDirectory && it.resolve("aapt2").exists() }
+            .maxByOrNull { it.name }?.resolve("aapt2")
+            ?: error("aapt2 isn't in the Android SDK's build-tools")
+        fun dump(vararg args: String): String {
+            val process = ProcessBuilder(listOf(aapt2.absolutePath) + args + file.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+            val text = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            return text
+        }
+        val permissions = dump("dump", "permissions")
+        check(!permissions.contains("RECORD_AUDIO")) {
+            "The Board's watch must not ask for RECORD_AUDIO: the Oppo is the microphone.\n$permissions"
+        }
+        val manifest = dump("dump", "xmltree", "--file", "AndroidManifest.xml")
+        check(manifest.contains("com.google.android.wearable.standalone")) {
+            "The Board's watch must declare com.google.android.wearable.standalone=false."
+        }
+        check(Regex("standalone[\\s\\S]{0,200}?=false").containsMatchIn(manifest)) {
+            "The Board's watch must be standalone=false (it pairs with the phone app)."
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleBoard" }.configureEach { finalizedBy(verifyBoardWatchInvariants) }
 
 dependencies {
     implementation(projects.shared.wearlink)

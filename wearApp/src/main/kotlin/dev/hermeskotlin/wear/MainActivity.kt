@@ -76,6 +76,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The Board's watch is a remote: this build holds no microphone, so the talk screen and the watch-held
+        // call don't exist. Everything it opens is the phone's own call, shown and toggled from here.
+        if (BuildConfig.BOARD_REMOTE) return openRemote()
         setContent {
             HeraldWatchApp(
                 link = app.link,
@@ -139,7 +142,14 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (BuildConfig.BOARD_REMOTE) return openRemote()
         handle(intent)
+    }
+
+    /** The Board's remote screen, in place of the talk screen: the phone records, this asks and shows. */
+    private fun openRemote() {
+        startActivity(Intent(this, BoardCallActivity::class.java))
+        finish()
     }
 
     private fun handle(intent: Intent) {

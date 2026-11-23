@@ -16,6 +16,20 @@ import kotlin.test.assertTrue
 class WearLinkTest {
 
     @Test
+    fun theWristsBoardCallAsksStartOrStopAndAPhoneKeepsWhatItAlreadySaid() {
+        val start = BoardCallRequest.start("a", boardId = "board")
+        assertEquals(BoardCallRequest.START, WearJson.decode<BoardCallRequest>(WearJson.encode(start))!!.action)
+        assertFalse(start.stopping)
+        assertTrue(BoardCallRequest.stop("b").stopping)
+        // A phone that knows no call view still decodes the board it has always sent; a newer one carries the call.
+        val old = WearJson.decode<BoardState>("{\"revision\":1,\"boardId\":\"board\"}".encodeToByteArray())!!
+        assertNull(old.call)
+        val call = BoardCallView(active = true, muted = true, route = "phone speaker")
+        val board = WearJson.decode<BoardState>(WearJson.encode(old.copy(call = call)))!!
+        assertEquals(call, board.call)
+    }
+
+    @Test
     fun explicitLaunchScopeSurvivesRecordedMessagesAndLegacyCallsKeepNoScope() {
         val scope = WatchScope("https://gateway.example", null)
         val ask = WatchAsk("ask", chatId = "saved", scope = scope)

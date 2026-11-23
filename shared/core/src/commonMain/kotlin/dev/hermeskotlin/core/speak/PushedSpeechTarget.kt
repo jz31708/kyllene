@@ -29,6 +29,9 @@ interface PushedSpeechTarget {
      */
     fun toggleMic() = Unit
 
+    /** The wrist's hang up: the phone ends this call, as its own End call does. */
+    fun hangUp() = Unit
+
     /**
      * Says [item] in the call's voice, verbatim, and reports how many characters have been audible.
      * Returns how it ended; [SpeakOutcome.Stopped] means barge-in or Skip cut it short.

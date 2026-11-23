@@ -90,6 +90,9 @@ object WearPaths {
     /** Watch → phone: a [HapticFired], evidence of the 300 ms cue; it asks for nothing. */
     const val BOARD_HAPTIC = "/herald/board/haptic"
 
+    /** Watch → phone: a [BoardCallRequest], the wrist starting or ending the call the **phone** holds. */
+    const val BOARD_CALL = "/herald/board/call"
+
     /** Every path above and below starts with this; the apps' listeners filter on it. */
     const val PREFIX = "/herald/"
 
@@ -359,7 +362,54 @@ data class BoardState(
     val seats: List<Seat> = emptyList(),
     val floor: String? = null,
     val pendingNotes: Int = 0,
+    /** The phone's own call as it stands, for the wrist's call screen: the phone records, the watch shows. */
+    val call: BoardCallView? = null,
 )
+
+/**
+ * The phone's Board call, as the watch shows it. The Oppo holds the microphone and the speaker; every field here
+ * comes from the phone, and the watch never infers one from a caption.
+ */
+@Serializable
+data class BoardCallView(
+    val active: Boolean = false,
+    val muted: Boolean = false,
+    val listening: Boolean = false,
+    val speaking: Boolean = false,
+    /** The output the phone plays on ("phone speaker", "Shokz OpenRun Pro 2"), once it knows. */
+    val route: String? = null,
+    /** What the call is talking in, for the wrist's title: the chat or seat ("Board"). */
+    val label: String? = null,
+    /** The phone's mode, as the wrist's ring reads it: "call", "swarm" or "idle". */
+    val mode: String? = null,
+    /**
+     * The phone's own capture, authoritative in both directions: "capturing" once its recorder is really running,
+     * anything else (or null) when it isn't. Only this turns the wrist's ring red; a tap never does.
+     */
+    val capture: String? = null,
+    /** Whether the phone can be reached at all; the wrist shows "Phone not connected" when it can't. */
+    val connected: Boolean = true,
+    /** The phone couldn't open its own call: "open_oppo_to_record", which the wrist shows as its banner. */
+    val fallback: String? = null,
+)
+
+/**
+ * The wrist's start or stop of the Board call: not a capture. [action] is [START] or [STOP]; [id] lets the phone
+ * answer the one ask it acted on. A start while a call is open changes nothing; a stop with none is void.
+ */
+@Serializable
+data class BoardCallRequest(val id: String, val action: String, val boardId: String? = null) {
+    val stopping: Boolean get() = action == STOP
+
+    companion object {
+        const val START = "start"
+        const val STOP = "stop"
+
+        fun start(id: String, boardId: String? = null) = BoardCallRequest(id, START, boardId)
+
+        fun stop(id: String, boardId: String? = null) = BoardCallRequest(id, STOP, boardId)
+    }
+}
 
 /** A seat round the Board; [color] is its ARGB colour from the phone's registry. */
 @Serializable

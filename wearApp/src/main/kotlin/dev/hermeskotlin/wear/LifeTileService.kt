@@ -12,7 +12,8 @@ import dev.hermeskotlin.wear.tiles.TileChip
 /**
  * The "Life" tile: what the phone's Life call is doing — idle, listening, live or muted — and the line it would
  * say. The phone publishes that as a [dev.hermeskotlin.wearlink.TilesState]; the tile never asks for it, so it
- * answers at once, and a tap opens the call screen. The "Ask" chip turns the tile over to two canned asks.
+ * answers at once, and a tap opens the Board's call screen, which asks the phone to take the call: the Oppo
+ * records, the watch shows and toggles. The "Ask" chip turns the tile over to two canned asks.
  */
 class LifeTileService : CallTileService() {
 
@@ -33,9 +34,10 @@ class LifeTileService : CallTileService() {
             title = life?.title ?: getString(R.string.wear_life_tile_default),
             state = stateWord(this, life?.state ?: "idle"),
             detail = detail,
-            onClick = launch(MainActivity::class.java, MainActivity.EXTRA_CALL),
-            chips = listOf(TileChip(ASKS_CHIP, getString(R.string.wear_tile_ask), reload())),
-            asks = if (asking(request)) cannedAsks() else emptyList(),
+            onClick = launch(BoardCallActivity::class.java, BoardCallActivity.EXTRA_START),
+            // A remote, as the Board tile is: nothing dictated here, and no asks sent from the wrist.
+            chips = if (BuildConfig.BOARD_REMOTE) emptyList() else listOf(TileChip(ASKS_CHIP, getString(R.string.wear_tile_ask), reload())),
+            asks = if (!BuildConfig.BOARD_REMOTE && asking(request)) cannedAsks() else emptyList(),
             fill = accents?.fill ?: HERALD_BLUE,
             onFill = accents?.onFill ?: ON_FILL,
         )

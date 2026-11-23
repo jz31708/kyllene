@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The Board's watch records nothing: the Oppo is the microphone. This build asks for no RECORD_AUDIO, and it
+    offers none of the upstream watch's capture surfaces either — the assistant that records on the wrist and the
+    recognizer it names are removed, so no gesture on the watch can open a microphone of its own. Every control
+    left is a command to the phone.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.RECORD_AUDIO"
+        tools:node="remove" />
+
+    <application>
+        <!-- Herald as the watch's assistant (its own listening screen, on the watch's microphone). -->
+        <service
+            android:name=".assist.HeraldWearAssistService"
+            tools:node="remove" />
+        <service
+            android:name=".assist.HeraldWearAssistSessionService"
+            tools:node="remove" />
+        <activity
+            android:name=".assist.AssistLaunchActivity"
+            tools:node="remove" />
+        <activity
+            android:name=".assist.MicrophonePermissionActivity"
+            tools:node="remove" />
+
+        <!-- The assistant role on the launcher activity, and the recognizer only an assistant may name. -->
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".assist.HeraldWearRecognitionService"
+            tools:node="remove" />
+    </application>
+</manifest>

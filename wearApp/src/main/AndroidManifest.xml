@@ -152,6 +152,14 @@
             android:launchMode="singleTop"
             android:taskAffinity="" />
 
+        <!-- The Board's call from the wrist: it asks the phone to take it, and shows what the phone reports. -->
+        <activity
+            android:name=".BoardCallActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="" />
+
         <service
             android:name=".AskComplicationService"
             android:exported="true"

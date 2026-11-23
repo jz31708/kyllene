@@ -3,6 +3,7 @@ package dev.hermeskotlin.android.wear
 import dev.hermeskotlin.core.speak.BoardCallBus
 import dev.hermeskotlin.core.speak.BoardCallSnapshot
 import dev.hermeskotlin.core.speak.PushedSpeechTargets
+import dev.hermeskotlin.wearlink.BoardCallView
 import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.CallTile
 import dev.hermeskotlin.wearlink.Seat
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class BoardTiles(
     private val sync: BoardSync,
     private val notes: BoardNotes,
+    private val calls: BoardCalls,
     private val scope: CoroutineScope,
 ) {
     // The watch rejects a revision it has already seen: a reinstall must still move it forward.
@@ -30,14 +32,17 @@ class BoardTiles(
     private var announced: Pair<String?, Int>? = null
 
     fun start() {
-        // The wrist's mic button toggles the phone's mic, whichever call holds it.
-        notes.mic = BoardMic { PushedSpeechTargets.current?.toggleMic() }
+        // The wrist's mic button toggles the phone's mic, whichever call holds it; with no call on, it opens one.
+        // Either way the Oppo records: the watch never opens a microphone of its own.
+        notes.mic = BoardMic { PushedSpeechTargets.current?.toggleMic() ?: calls.start() }
         scope.launch {
             BoardCallBus.state.collect { snapshot -> publish(snapshot) }
         }
     }
 
     private fun publish(snapshot: BoardCallSnapshot) {
+        // The phone can open its call again: the wrist's "Open Oppo to record" line goes with the next publish.
+        if (snapshot.active) calls.opened()
         revision += 1
         val board = CallTile(
             id = BOARD,
@@ -65,6 +70,20 @@ class BoardTiles(
                 seats = SEATS,
                 floor = snapshot.floor,
                 pendingNotes = notes.pending(),
+                // The phone's call, for the wrist's call screen: it shows this, it never derives it.
+                call = BoardCallView(
+                    active = snapshot.active,
+                    muted = snapshot.muted,
+                    listening = snapshot.listening,
+                    speaking = snapshot.speaking,
+                    route = snapshot.route,
+                    // The wrist's ring reads the phone's own mode and capture, never a guess: only this can
+                    // turn it red, and only from the phone actually recording.
+                    mode = if (snapshot.active) "call" else "idle",
+                    capture = if (snapshot.listening && !snapshot.muted) "capturing" else null,
+                    connected = true,
+                    fallback = calls.fallback,
+                ),
             ),
         )
         // A line is about to be audible: announce its predicted onset once, so the watch can lead it by 300 ms.

@@ -10,6 +10,7 @@ import dev.hermeskotlin.core.settings.SettingsStore
 import dev.hermeskotlin.core.wear.WatchRelay
 import dev.hermeskotlin.ui.voice.WatchCalls
 import dev.hermeskotlin.ui.voice.watchAccent
+import dev.hermeskotlin.wearlink.BoardCallRequest
 import dev.hermeskotlin.wearlink.CallEnd
 import dev.hermeskotlin.wearlink.CallEvents
 import dev.hermeskotlin.wearlink.ChatListRequest
@@ -51,6 +52,7 @@ class WearBridgeService : WearableListenerService() {
     private val pebbleRequests: PebbleRequests by inject()
     private val board: BoardSync by inject()
     private val notes: BoardNotes by inject()
+    private val boardCalls: BoardCalls by inject()
 
     override fun onMessageReceived(event: MessageEvent) {
         val node = event.sourceNodeId
@@ -93,6 +95,8 @@ class WearBridgeService : WearableListenerService() {
             }
             // Evidence that the cue went off, kept for tuning the next one; it gates nothing.
             WearPaths.BOARD_HAPTIC -> WearJson.decode<HapticFired>(event.data)?.let(board::hapticFired)
+            // The wrist's start or stop of the phone's own Board call: the Oppo records, the watch asks.
+            WearPaths.BOARD_CALL -> WearJson.decode<BoardCallRequest>(event.data)?.let(boardCalls::requested)
         }
     }
 
