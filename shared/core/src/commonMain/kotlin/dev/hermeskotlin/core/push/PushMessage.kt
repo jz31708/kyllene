@@ -37,8 +37,11 @@ data class PushMessage(
     val priority: String? = null,
     /** The call a [SPEAK] was queued for; absent means any call may say it. */
     val call: String? = null,
-    /** The intent revision a [SPEAK] belongs to. */
+    /** The intent revision a [SPEAK] belongs to; revisions are per project. */
     val rev: Long? = null,
+    /** The company and project a [SPEAK] (or a revision frame) belongs to, when the gateway names them. */
+    val company: String? = null,
+    val project: String? = null,
     /** The revision past which a [SPEAK] is no longer true and must not start. */
     @SerialName("expires_on_rev") val expiresOnRev: Long? = null,
     /** A [SPEAK]'s intent, and the utterance that groups the parts of one answer; [part] of [parts]. */

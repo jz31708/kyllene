@@ -106,8 +106,10 @@ During a call the gateway pushes the same plaintext as an ordinary JSON-RPC even
 ```
 
 `SpeakItem.fromEvent` fills in the type the payload leaves out. A correction arrives as
-`{"type":"intent.revision","payload":{"rev":43}}`; queued items bound below 43 are retired and acknowledged
-`expired`.
+`{"type":"intent.revision","payload":{"rev":43,"company":"travel","project":"travel-deals"}}`; only queued
+items of that project bound below 43 are retired and acknowledged `expired`. Revisions are per project, so a
+correction in one company never retires another's answer; a frame with no `project` keeps the older,
+global rule and retires every project's older lines.
 
 The ack goes back as a **JSON-RPC notification** (no id, no reply): method `speak_ack`, params the §4 object.
 An ack that cannot be sent is dropped; it never delays or fails a call.

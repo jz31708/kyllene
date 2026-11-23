@@ -23,6 +23,9 @@ data class SpeakItem(
     val label: String? = null,
     /** The stored session the words belong to, so the call shows the thread they came from. */
     val session: String? = null,
+    /** The company and project the words belong to; intent revisions are compared inside one project. */
+    val company: String? = null,
+    val project: String? = null,
     /** The call the gateway bound this to; null means any active call may say it. */
     val call: String? = null,
     /** The intent whose correction these words answer. Words of one intent never overlap. */
@@ -62,6 +65,8 @@ data class SpeakItem(
                 seat = message.bot,
                 label = message.label,
                 session = message.session,
+                company = message.company,
+                project = message.project,
                 call = message.call,
                 intent = message.intent,
                 utterance = message.utterance,
@@ -164,7 +169,10 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
     private val seen = LinkedHashSet<String>()
     private var speaking: SpeakItem? = null
     private var heard = 0
+    /** The revision of a frame that named no project: it still retires every project's older lines. */
     private var revision: Long? = null
+    /** Revisions are per project; a frame for one never retires another's queued lines. */
+    private val projectRevisions = mutableMapOf<String, Long>()
 
     /** What is being said now, if anything. */
     val playing: SpeakItem? get() = speaking
@@ -175,8 +183,12 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
     /** What waits, in the order it would be said after the item playing now. */
     val queued: List<SpeakItem> get() = waiting.sortedWith(ORDER)
 
-    /** The intent revision the queue follows. */
+    /** The intent revision the queue follows when no project was named. */
     val rev: Long? get() = revision
+
+    /** The revision the queue follows for [project]: its own, or a project-less frame's when that is newer. */
+    fun revOf(project: String?): Long? =
+        if (project == null) revision else listOfNotNull(projectRevisions[project], revision).maxOrNull()
 
     /**
      * Takes an utterance from the gateway (or from a seat's tool call). A repeat of one already queued, played
@@ -186,7 +198,7 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
         if (item.text.isBlank()) return false
         if (item.expiredAt(now)) return false
         if (item.id in seen) return false
-        if (item.staleAt(revision)) return false
+        if (item.staleAt(revOf(item.project))) return false
         remember(item.id)
         waiting += item
         // The oldest news goes first when a gateway floods the queue: what a person asked for stays.
@@ -198,15 +210,30 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
     }
 
     /**
-     * Moves to [revision] because something was corrected somewhere. Items bound to an older revision are
-     * retired; what was already heard of the playing one is kept, and it stops after the current sentence.
-     * Returns the acknowledgements for the items that never started.
+     * Moves to [revision] because something was corrected. With a [project], only that project's queued lines
+     * are compared — a correction in one company never retires another's answer. Without one, today's rule
+     * stands: every project's lines expire together.
+     *
+     * What was already heard of the playing line is kept; it stops after the current sentence. Returns the
+     * acknowledgements for the lines that never started.
      */
-    fun advanceTo(revision: Long): List<SpeakAck> {
-        val current = this.revision
-        if (current != null && revision <= current) return emptyList()
-        this.revision = revision
-        val retired = waiting.filter { it.staleAt(revision) }
+    fun advanceTo(revision: Long, project: String? = null): List<SpeakAck> {
+        if (project == null) {
+            val current = this.revision
+            if (current != null && revision <= current) return emptyList()
+            this.revision = revision
+            // A frame that names no project keeps the old, global meaning: it retires every project's old lines.
+            projectRevisions.keys.toList().forEach { p ->
+                projectRevisions[p] = maxOf(projectRevisions[p] ?: revision, revision)
+            }
+        } else {
+            val current = projectRevisions[project]
+            if (current != null && revision <= current) return emptyList()
+            projectRevisions[project] = revision
+        }
+        val retired = waiting.filter { item ->
+            (project == null || item.project == project) && item.staleAt(revOf(item.project))
+        }
         waiting.removeAll(retired)
         return retired.map { SpeakAck(it.id, it.utterance, 0, SpeakOutcome.Expired) }
     }
@@ -229,7 +256,7 @@ class SpeakQueue(private val limit: Int = MAX_ITEMS) {
         if (speaking != null) return null
         if (!floor.callActive || floor.personSpeaking || !floor.audioFree || floor.busy) return null
         val ready = waiting.sortedWith(ORDER).firstOrNull { item ->
-            !item.staleAt(revision) && !item.expiredAt(now) &&
+            !item.staleAt(revOf(item.project)) && !item.expiredAt(now) &&
                 // Words bound to a call wait for that call, and for a phone that knows which call it is on.
                 (item.call == null || item.call == floor.call)
         } ?: return null

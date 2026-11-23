@@ -15,11 +15,15 @@ class SpeakQueueTest {
         call: String? = null,
         intent: String? = null,
         part: Int = 1,
+        project: String? = null,
         rev: Long? = null,
         expiresOnRev: Long? = null,
         expires: Long? = null,
         at: Long = 1,
-    ) = SpeakItem(id, text, priority, call = call, intent = intent, part = part, rev = rev, expiresOnRev = expiresOnRev, expires = expires, at = at)
+    ) = SpeakItem(
+        id, text, priority, call = call, intent = intent, part = part, project = project,
+        rev = rev, expiresOnRev = expiresOnRev, expires = expires, at = at,
+    )
 
     private val floor = SpeakFloor(callActive = true)
 
@@ -82,6 +86,31 @@ class SpeakQueueTest {
         // A phone that doesn't know which call it is on does not guess.
         assertNull(queue.next(floor))
         assertEquals("s1", queue.next(SpeakFloor(callActive = true, call = "call-b"))?.id)
+    }
+
+    @Test
+    fun `a revision in one project never retires another project's line`() {
+        val queue = SpeakQueue()
+        assertTrue(queue.offer(item(id = "a", project = "alpha", expiresOnRev = 7)))
+        assertTrue(queue.offer(item(id = "b", project = "beta", expiresOnRev = 7)))
+        // The beta correction moves beta past the line's revision; alpha is untouched.
+        assertEquals(listOf("b"), queue.advanceTo(9, project = "beta").map { it.id })
+        // A new beta line bound to the old revision is refused...
+        assertFalse(queue.offer(item(id = "b2", project = "beta", expiresOnRev = 7)))
+        // ...while alpha's own revision still governs alpha.
+        assertTrue(queue.offer(item(id = "a2", project = "alpha", expiresOnRev = 7)))
+        assertEquals("a", queue.next(floor)?.id)
+        queue.finished()
+        assertEquals("a2", queue.next(floor)?.id)
+    }
+
+    @Test
+    fun `a frame with no project keeps retiring every project`() {
+        val queue = SpeakQueue()
+        assertTrue(queue.offer(item(id = "a", project = "alpha", expiresOnRev = 7)))
+        assertTrue(queue.offer(item(id = "b", project = "beta", expiresOnRev = 7)))
+        assertEquals(setOf("a", "b"), queue.advanceTo(9).map { it.id }.toSet())
+        assertNull(queue.next(floor))
     }
 
     @Test

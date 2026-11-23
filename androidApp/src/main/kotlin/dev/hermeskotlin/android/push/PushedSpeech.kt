@@ -122,12 +122,15 @@ class PushedSpeech(
         }
     }
 
-    /** A correction elsewhere retires queued lines bound to the old revision (`§11.3`). */
+    /**
+     * A correction retires queued lines bound to the old revision (`§11.3`). Revisions are per project: a
+     * frame naming one project never retires another's answer; a frame with no project keeps the global rule.
+     */
     private fun revision(payload: JsonElement?) {
-        val rev = (payload as? JsonObject)?.get("rev")
-            ?.let { (it as? JsonPrimitive)?.contentOrNull?.toLongOrNull() }
-            ?: return
-        queue.advanceTo(rev).forEach(::acknowledge)
+        val body = payload as? JsonObject ?: return
+        val rev = body["rev"]?.let { (it as? JsonPrimitive)?.contentOrNull?.toLongOrNull() } ?: return
+        val project = (body["project"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        queue.advanceTo(rev, project).forEach(::acknowledge)
     }
 
     /** Evidence, not permission: tells the seat how much of its line was audible. Never blocks the call. */
