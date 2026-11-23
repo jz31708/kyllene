@@ -2,6 +2,14 @@
 <resources>
     <string name="voice_chat">Hangcsevegés</string>
     <string name="voice_connecting">Kapcsolódás…</string>
+    <string name="voice_mic_blocked">A mikrofon le van tiltva</string>
+    <string name="voice_mic_blocked_hint">Engedélyezd a mikrofont a beszédhez</string>
+    <string name="voice_mic_silent">Nem hallak</string>
+    <string name="voice_mic_silent_hint">Ellenőrizd a mikrofont, majd próbáld újra</string>
+    <string name="voice_mic_open_settings">Beállítások megnyitása</string>
+    <string name="voice_mic_try_again">Próbáld újra</string>
+    <string name="voice_use_headset_mic">Fejhallgató mikrofonját</string>
+    <string name="voice_use_phone_mic">Telefon mikrofonját</string>
     <string name="voice_muted">Némítva</string>
     <string name="voice_hearing">Hallak…</string>
     <string name="voice_listening">Figyelek…</string>

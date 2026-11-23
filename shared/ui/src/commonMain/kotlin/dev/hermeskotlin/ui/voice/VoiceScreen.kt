@@ -80,6 +80,8 @@ import com.composables.icons.lucide.Keyboard
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Mic
 import com.composables.icons.lucide.MicOff
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SkipForward
 import com.composables.icons.lucide.X
 import com.composeunstyled.Text
@@ -137,6 +139,10 @@ internal fun VoiceScreen(
     onType: () -> Unit,
     /** Sends what's been heard without waiting for the pause. */
     onSendNow: () -> Unit = {},
+    /** The microphone is blocked: open this app's permission page, where it's given for good. */
+    onOpenMicSettings: () -> Unit = {},
+    /** The microphone is blocked (it hears nothing): listen again. */
+    onRetryMic: () -> Unit = {},
 ) {
     PlatformBackHandler(enabled = active, onBack = onMinimize)
     val glow = Theme[colors][accent].copy(alpha = 0.22f)
@@ -199,10 +205,20 @@ internal fun VoiceScreen(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Mute on the left in a call and a chained chat alike; an empty slot keeps End in the middle.
-                    if (state.phase != VoicePhase.Connecting) {
-                        SideButton(Lucide.Mic.takeUnless { state.muted } ?: Lucide.MicOff, stringResource(Res.string.voice_mute), onMute, on = state.muted, toggle = true)
-                    } else {
-                        Spacer(Modifier.size(52.dp))
+                    // A blocked microphone takes its place with the one thing that fixes it.
+                    when {
+                        state.phase == VoicePhase.Blocked -> {
+                            val silent = state.blocked == MicrophoneBlock.Silence
+                            SideButton(
+                                if (silent) Lucide.RefreshCw else Lucide.Settings,
+                                stringResource(if (silent) Res.string.voice_mic_try_again else Res.string.voice_mic_open_settings),
+                                if (silent) onRetryMic else onOpenMicSettings,
+                                on = true,
+                            )
+                        }
+                        state.phase != VoicePhase.Connecting ->
+                            SideButton(Lucide.Mic.takeUnless { state.muted } ?: Lucide.MicOff, stringResource(Res.string.voice_mute), onMute, on = state.muted, toggle = true)
+                        else -> Spacer(Modifier.size(52.dp))
                     }
                     EndButton(onEnd)
                     // Skip and Send now are only there for a moment, so they stand in for Type instead meanwhile.
@@ -341,7 +357,8 @@ private fun WorkingChip(tool: String) {
  */
 @Composable
 private fun BigOrb(state: VoiceChatState, modifier: Modifier = Modifier) {
-    val muted = state.muted
+    // A blocked microphone greys it all and stills it, as Mute does: the chat isn't hearing anything.
+    val muted = state.muted || state.phase == VoicePhase.Blocked
     val tint by animateColorAsState(if (muted) Theme[colors][textMuted] else Theme[colors][accent])
     val soft by animateColorAsState(if (muted) Theme[colors][surface3] else Theme[colors][accentSoft])
     val arc = Theme[colors][accentText]

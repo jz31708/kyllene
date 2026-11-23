@@ -55,6 +55,8 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Mic
 import com.composables.icons.lucide.MicOff
 import com.composables.icons.lucide.PhoneOff
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SkipForward
 import com.composeunstyled.Text
 import com.composeunstyled.UnstyledButton
@@ -103,6 +105,10 @@ internal fun VoicePanel(
     onExpand: () -> Unit,
     onSendNow: () -> Unit = {},
     onHeadsetMic: () -> Unit = {},
+    /** The microphone is blocked: open this app's permission page. */
+    onOpenMicSettings: () -> Unit = {},
+    /** The microphone is blocked: listen again (the silence case). */
+    onRetryMic: () -> Unit = {},
 ) {
     val shape = RoundedCornerShape(28.dp)
     val page = Theme[colors][background]
@@ -160,8 +166,18 @@ internal fun VoicePanel(
             horizontalArrangement = Arrangement.spacedBy(40.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Mute in a call and a chained chat alike; empty slots keep End in the middle.
-            if (state.phase != VoicePhase.Connecting) {
+            // Mute in a call and a chained chat alike; empty slots keep End in the middle. A blocked microphone
+            // takes Mute's place with what fixes it.
+            if (state.phase == VoicePhase.Blocked) {
+                val silent = state.blocked == MicrophoneBlock.Silence
+                RoundButton(
+                    if (silent) Lucide.RefreshCw else Lucide.Settings,
+                    contentDescription = stringResource(if (silent) Res.string.voice_mic_try_again else Res.string.voice_mic_open_settings),
+                    fill = Theme[colors][accent],
+                    tint = Theme[colors][background],
+                    onClick = if (silent) onRetryMic else onOpenMicSettings,
+                )
+            } else if (state.phase != VoicePhase.Connecting) {
                 RoundButton(
                     if (state.muted) Lucide.MicOff else Lucide.Mic,
                     contentDescription = stringResource(if (state.muted) Res.string.voice_unmute else Res.string.voice_mute),
@@ -211,6 +227,9 @@ internal fun VoicePanel(
 @Composable
 internal fun label(state: VoiceChatState): String = when (state.phase) {
     VoicePhase.Connecting -> stringResource(Res.string.voice_connecting)
+    VoicePhase.Blocked -> stringResource(
+        if (state.blocked == MicrophoneBlock.Silence) Res.string.voice_mic_silent else Res.string.voice_mic_blocked,
+    )
     VoicePhase.Listening -> stringResource(
         if (state.muted) Res.string.voice_muted else if (state.hearing) Res.string.voice_hearing else Res.string.voice_listening,
     )
@@ -220,13 +239,18 @@ internal fun label(state: VoiceChatState): String = when (state.phase) {
     VoicePhase.Off -> ""
 }
 
+/** The chat isn't listening because the microphone can't be used; nothing is sent until it says so again. */
+internal fun blockedByMicrophone(state: VoiceChatState) = state.phase == VoicePhase.Blocked
+
 /** The chained chat has heard you: what's said so far can go now, without waiting for the pause. */
 internal fun canSendNow(state: VoiceChatState) = !state.live && state.phase == VoicePhase.Listening && state.hearing
 
 /** What to do now, while there are no words to show; [hintText] words it. */
-internal enum class VoiceHint { Unmute, Connecting, Working, TalkOver, Skip, SendNow, JustTalk }
+internal enum class VoiceHint { Unmute, Connecting, Working, TalkOver, Skip, SendNow, JustTalk, Blocked, Silent }
 
 internal fun hint(state: VoiceChatState) = when {
+    state.phase == VoicePhase.Blocked ->
+        if (state.blocked == MicrophoneBlock.Silence) VoiceHint.Silent else VoiceHint.Blocked
     state.muted -> VoiceHint.Unmute
     state.phase == VoicePhase.Connecting -> VoiceHint.Connecting
     state.phase == VoicePhase.Thinking -> VoiceHint.Working
@@ -245,6 +269,8 @@ internal fun hintText(state: VoiceChatState): String = stringResource(
         VoiceHint.TalkOver -> Res.string.voice_hint_talk_over
         VoiceHint.Skip -> Res.string.voice_hint_skip
         VoiceHint.SendNow -> Res.string.voice_hint_send_now
+        VoiceHint.Blocked -> Res.string.voice_mic_blocked_hint
+        VoiceHint.Silent -> Res.string.voice_mic_silent_hint
         VoiceHint.JustTalk -> Res.string.voice_hint_just_talk
     },
 )
@@ -293,7 +319,10 @@ private fun RoundButton(icon: ImageVector, contentDescription: String, fill: Col
  */
 @Composable
 private fun Orb(state: VoiceChatState, modifier: Modifier = Modifier) {
-    val tint by animateColorAsState(if (state.muted) Theme[colors][textTertiary] else Theme[colors][accentText])
+    // A microphone that can't be used greys the orb like Mute does: nothing is being heard, and it must not look
+    // as though it were.
+    val quiet = state.muted || state.phase == VoicePhase.Blocked
+    val tint by animateColorAsState(if (quiet) Theme[colors][textTertiary] else Theme[colors][accentText])
     val time by rememberInfiniteTransition().animateFloat(
         initialValue = 0f,
         targetValue = 1f,

@@ -2,6 +2,14 @@
 <resources>
     <string name="voice_chat">Conversa por voz</string>
     <string name="voice_connecting">Conectando…</string>
+    <string name="voice_mic_blocked">Microfone bloqueado</string>
+    <string name="voice_mic_blocked_hint">Permita o microfone para falar</string>
+    <string name="voice_mic_silent">Não consigo te ouvir</string>
+    <string name="voice_mic_silent_hint">Verifique o microfone e tente de novo</string>
+    <string name="voice_mic_open_settings">Abrir ajustes</string>
+    <string name="voice_mic_try_again">Tentar de novo</string>
+    <string name="voice_use_headset_mic">Usar o microfone do fone</string>
+    <string name="voice_use_phone_mic">Usar o microfone do telefone</string>
     <string name="voice_muted">Sem som</string>
     <string name="voice_hearing">Ouvindo você…</string>
     <string name="voice_listening">Escutando…</string>

@@ -228,6 +228,8 @@ internal fun callStatus(state: PhoneCallState, seconds: Long): CallStatus {
         VoicePhase.Transcribing -> CallStatus.Doing.Listening
         VoicePhase.Thinking -> if (voice.working != null) CallStatus.Doing.Working else CallStatus.Doing.Thinking
         VoicePhase.Speaking -> CallStatus.Doing.Speaking
+        // A call whose microphone can't be used: it isn't listening, but it isn't the person's Mute either.
+        VoicePhase.Blocked -> CallStatus.Doing.Blocked
     }
     return CallStatus.Live(length, doing, voice.working.takeIf { doing == CallStatus.Doing.Working })
 }
@@ -240,7 +242,7 @@ internal sealed interface CallStatus {
     /** [length] as m:ss; [tool] is what Hermes runs, while [doing] is [Doing.Working]. */
     data class Live(val length: String, val doing: Doing, val tool: String? = null) : CallStatus
 
-    enum class Doing { Listening, Muted, Thinking, Working, Speaking }
+    enum class Doing { Listening, Muted, Thinking, Working, Speaking, Blocked }
 }
 
 @Composable
@@ -254,6 +256,7 @@ internal fun callStatusText(status: CallStatus): String = when (status) {
             CallStatus.Doing.Thinking -> stringResource(Res.string.call_thinking)
             CallStatus.Doing.Working -> stringResource(Res.string.call_working, status.tool.orEmpty())
             CallStatus.Doing.Speaking -> stringResource(Res.string.call_speaking)
+            CallStatus.Doing.Blocked -> stringResource(Res.string.voice_mic_blocked)
         }
         stringResource(Res.string.call_status, status.length, doing)
     }

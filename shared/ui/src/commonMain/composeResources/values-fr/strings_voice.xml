@@ -2,6 +2,14 @@
 <resources>
     <string name="voice_chat">Chat vocal</string>
     <string name="voice_connecting">Connexion…</string>
+    <string name="voice_mic_blocked">Micro bloqué</string>
+    <string name="voice_mic_blocked_hint">Autorisez le micro pour parler</string>
+    <string name="voice_mic_silent">Je ne vous entends pas</string>
+    <string name="voice_mic_silent_hint">Vérifiez le micro, puis réessayez</string>
+    <string name="voice_mic_open_settings">Ouvrir les paramètres</string>
+    <string name="voice_mic_try_again">Réessayer</string>
+    <string name="voice_use_headset_mic">Utiliser le micro du casque</string>
+    <string name="voice_use_phone_mic">Utiliser le micro du téléphone</string>
     <string name="voice_muted">Muet</string>
     <string name="voice_hearing">Je vous entends…</string>
     <string name="voice_listening">À l’écoute…</string>

@@ -3,6 +3,7 @@ package dev.hermeskotlin.ui.di
 import dev.hermeskotlin.core.di.coreModule
 import dev.hermeskotlin.core.di.platformModule
 import dev.hermeskotlin.core.voice.DeviceLock
+import dev.hermeskotlin.core.voice.MicrophoneCheck
 import dev.hermeskotlin.ui.AppViewModel
 import dev.hermeskotlin.ui.bots.BotsViewModel
 import dev.hermeskotlin.ui.chat.ChatViewModel
@@ -59,6 +60,7 @@ val uiModule = module {
             deviceLock = getOrNull() ?: DeviceLock.None,
             nextPromptApi = get(),
             readAloudKeepAlive = getOrNull(),
+            microphone = getOrNull<MicrophoneCheck>() ?: MicrophoneCheck.Always,
         )
     }
     // A chat in a window of its own (the desktop's Open in new window), with the host it's handed: the app's one
@@ -74,6 +76,7 @@ val uiModule = module {
             deviceLock = getOrNull() ?: DeviceLock.None,
             nextPromptApi = get(),
             readAloudKeepAlive = getOrNull(),
+            microphone = getOrNull<MicrophoneCheck>() ?: MicrophoneCheck.Always,
         )
     }
     viewModelOf(::SettingsViewModel)

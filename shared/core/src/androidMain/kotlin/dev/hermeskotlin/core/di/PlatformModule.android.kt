@@ -15,11 +15,15 @@ import dev.hermeskotlin.core.voice.AndroidLiveCall
 import dev.hermeskotlin.core.voice.DeviceDictation
 import dev.hermeskotlin.core.voice.DeviceLock
 import android.app.KeyguardManager
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import dev.hermeskotlin.core.voice.AndroidSpeechPlayer
 import dev.hermeskotlin.core.voice.ChatAudioRoute
 import dev.hermeskotlin.core.voice.ReadAloudVoices
 import dev.hermeskotlin.core.voice.FileReadAloudVoices
 import dev.hermeskotlin.core.voice.LiveCalls
+import dev.hermeskotlin.core.voice.MicrophoneCheck
 import dev.hermeskotlin.core.voice.AndroidVoiceRecorder
 import dev.hermeskotlin.core.voice.SpeechPlayer
 import dev.hermeskotlin.core.voice.VoiceRecorder
@@ -42,6 +46,13 @@ actual val platformModule: Module = module {
     single<ReadAloudVoices> { FileReadAloudVoices(File(androidContext().cacheDir, "read-aloud")) }
     // One per screen, like the recorder: the chat and the assistant panel each stop only their own.
     factory<DeviceDictation> { AndroidDeviceDictation(androidContext()) }
+    // Asked before every listen: Android can take a one-time grant back once the app is in the background.
+    single<MicrophoneCheck> {
+        val context = androidContext()
+        MicrophoneCheck {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        }
+    }
     single { LiveCalls { AndroidLiveCall(androidContext()) } }
     single {
         val keyguard = androidContext().getSystemService(KeyguardManager::class.java)

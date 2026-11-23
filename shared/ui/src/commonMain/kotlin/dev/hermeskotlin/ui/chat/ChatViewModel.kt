@@ -58,6 +58,7 @@ import dev.hermeskotlin.ui.pet.PetController
 import dev.hermeskotlin.ui.journey.JourneyController
 import dev.hermeskotlin.core.voice.AudioApi
 import dev.hermeskotlin.core.voice.LiveCalls
+import dev.hermeskotlin.core.voice.MicrophoneCheck
 import dev.hermeskotlin.core.voice.ReadAloudKeepAlive
 import dev.hermeskotlin.core.voice.VoiceKeepAlive
 import dev.hermeskotlin.core.voice.SpeechPlayer
@@ -245,6 +246,8 @@ class ChatViewModel(
     nextPromptApi: NextPromptApi? = null,
     /** Keeps Read aloud going with the screen off; without it, leaving the app stops the reading. */
     readAloudKeepAlive: ReadAloudKeepAlive? = null,
+    /** Whether the app may open the microphone now; only Android can say no. */
+    microphone: MicrophoneCheck = MicrophoneCheck.Always,
 ) : ViewModel(), ChatActions {
 
     /** Dictation, voice chat and Read aloud for the open chat. */
@@ -255,6 +258,7 @@ class ChatViewModel(
         liveCalls = liveCalls,
         readAloudVoices = readAloudVoices ?: InMemoryReadAloudVoices(),
         readAloudKeepAlive = readAloudKeepAlive,
+        microphone = microphone,
     )
 
     /** The profile's pet and its gallery. */
@@ -743,6 +747,9 @@ class ChatViewModel(
         val pause = (settings.settings.value ?: AppSettings()).voicePause
         voice.startChat(chat, target.gateway.gatewayUrl, target.profile, pause.millis, ringback = ringback)
     }
+
+    /** The microphone was refused before the chat could start: the voice screen says so and offers Settings. */
+    fun showMicrophoneBlocked() = voice.showMicrophoneBlocked()
 
     /** Starts dictating into the composer, or finishes the dictation in progress. */
     fun toggleDictation() {

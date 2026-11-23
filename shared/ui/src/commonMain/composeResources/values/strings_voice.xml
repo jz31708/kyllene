@@ -7,6 +7,13 @@
     <string name="voice_chat">Voice chat</string>
     <string name="voice_connecting">Connecting…</string>
     <string name="voice_muted">Muted</string>
+    <!-- The microphone isn't usable: the app may not have it, or it hears nothing. Never "listening". -->
+    <string name="voice_mic_blocked">Microphone blocked</string>
+    <string name="voice_mic_blocked_hint">Allow the microphone to talk</string>
+    <string name="voice_mic_silent">Can’t hear you</string>
+    <string name="voice_mic_silent_hint">Check the microphone, then try again</string>
+    <string name="voice_mic_open_settings">Open settings</string>
+    <string name="voice_mic_try_again">Try again</string>
     <string name="voice_hearing">Hearing you…</string>
     <string name="voice_listening">Listening…</string>
     <string name="voice_transcribing">Catching that…</string>

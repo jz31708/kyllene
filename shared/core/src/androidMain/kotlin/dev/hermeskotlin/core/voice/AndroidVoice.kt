@@ -15,6 +15,7 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AudioEffect
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
@@ -48,6 +49,8 @@ class AndroidVoiceRecorder(
     private val noAudioMs: Long = NO_AUDIO_MS,
     /** Whether a chained chat holds call routing, which changes the microphone [record] opens. */
     private val route: ChatAudioRoute? = null,
+    /** How long only zeroes may come from the microphone before the turn is refused as unhearable. */
+    private val silentMicMs: Long = SILENT_MIC_MS,
 ) : VoiceRecorder {
 
     @Volatile private var finishRequested = false
@@ -60,16 +63,27 @@ class AndroidVoiceRecorder(
         // microphone the reply is listened over with hears them, so the turn between replies uses it too.
         val callAudio = route?.callAudio() == true
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val record = AudioRecord(
-            if (callAudio) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            maxOf(minBuffer, FRAME_SAMPLES * 2 * 4),
-        )
+        // A permission taken back (a one-time grant the app went to the background on) fails the open, and some
+        // builds throw for it instead: either way it's told apart from hearing nothing, so the chat says which.
+        val record = try {
+            AudioRecord(
+                if (callAudio) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBuffer, FRAME_SAMPLES * 2 * 4),
+            )
+        } catch (e: SecurityException) {
+            Log.i(MIC_TAG, "blocked=permission: the recorder wouldn't open (${e.message})")
+            throw MicrophoneBlocked()
+        } catch (e: IllegalArgumentException) {
+            Log.i(MIC_TAG, "blocked=unavailable: the recorder wouldn't open (${e.message})")
+            throw MicrophoneBlocked()
+        }
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
-            error("The microphone isn't available.")
+            Log.i(MIC_TAG, "blocked=permission: the recorder didn't initialize")
+            throw MicrophoneBlocked()
         }
         // Noise suppression, and on the call microphone echo cancelling as over the reply. No automatic gain: it
         // lifts the room's hum in every pause until it reads as talking, and the end of speech is never found.
@@ -84,19 +98,41 @@ class AndroidVoiceRecorder(
             if (callAudio && AcousticEchoCanceler.isAvailable()) runCatching { AcousticEchoCanceler.create(record.audioSessionId) }.getOrNull()?.let(effects::add)
             if (NoiseSuppressor.isAvailable()) runCatching { NoiseSuppressor.create(record.audioSessionId) }.getOrNull()?.let(effects::add)
             effects.forEach { runCatching { it.enabled = true } }
-            record.startRecording()
-            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) error("The microphone isn't available.")
+            try {
+                record.startRecording()
+            } catch (e: SecurityException) {
+                Log.i(MIC_TAG, "blocked=permission: recording wouldn't start (${e.message})")
+                throw MicrophoneBlocked()
+            } catch (e: IllegalStateException) {
+                Log.i(MIC_TAG, "blocked=permission: recording wouldn't start (${e.message})")
+                throw MicrophoneBlocked()
+            }
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                Log.i(MIC_TAG, "blocked=permission: recording isn't running")
+                throw MicrophoneBlocked()
+            }
+            // Digits of nothing at all, not a quiet room: Android feeds a muted or withdrawn microphone zeroes
+            // while reporting it as recording. Said out loud after [silentMicMs] rather than listening for ever.
+            var silentMs = 0L
             while (!finishRequested) {
                 ensureActive()
                 if (!record.readFrame(frame) { finishRequested }) break
                 bytes.clear()
                 var sum = 0.0
+                var silent = true
                 for (sample in frame) {
                     bytes.putShort(sample)
                     sum += sample.toDouble() * sample
+                    if (sample != 0.toShort()) silent = false
                 }
                 pcm.write(bytes.array())
                 elapsed += FRAME_MS
+                // Only before anyone is heard: a sentence already under way is the end-of-speech wait's to end.
+                silentMs = if (silent && !endOfSpeech.heardSpeech) silentMs + FRAME_MS else 0L
+                if (silentMs >= silentMicMs) {
+                    Log.i(MIC_TAG, "blocked=silence: $silentMs ms of digital silence, no speech")
+                    throw MicrophoneSilent()
+                }
                 // Desktop measures 8-bit samples (±128) against 42; 16-bit samples are 256 times larger.
                 val level = min(1.0, sqrt(sum / frame.size) / 256.0 / 42.0).toFloat()
                 onLevel(level)
@@ -262,6 +298,14 @@ class AndroidVoiceRecorder(
         /** 20 ms frames: fine-grained enough for the silence timer. */
         const val FRAME_SAMPLES = SAMPLE_RATE / 50
         const val FRAME_MS = 20L
+
+        /** Three seconds of pure zeroes is a microphone that isn't there, not a quiet room. */
+        const val SILENT_MIC_MS = 3_000L
+        /**
+         * The microphone chain's proof in logcat, on the phone and in the app alike: `adb logcat -s WT-MIC` says
+         * whether a turn came from a permission that was gone or from a microphone hearing nothing.
+         */
+        const val MIC_TAG = "WT-MIC"
     }
 }
 

@@ -320,7 +320,9 @@ import dev.hermeskotlin.ui.voice.briefError
 import dev.hermeskotlin.core.voice.readAloudText
 import dev.hermeskotlin.core.voice.speakableText
 import androidx.compose.runtime.saveable.rememberSaveable
+import dev.hermeskotlin.ui.voice.rememberMicrophoneCheck
 import dev.hermeskotlin.ui.voice.rememberMicrophonePermission
+import dev.hermeskotlin.ui.voice.rememberMicrophoneSettings
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.composables.icons.lucide.AudioLines
@@ -478,7 +480,6 @@ fun ChatScreen(
     }
     var notice by remember { mutableStateOf<String?>(null) }
     // The notices below are set from callbacks, outside composition, so their words are read here first.
-    val voiceNeedsMic = stringResource(Res.string.chat_notice_voice_mic)
     val dictationNeedsMic = stringResource(Res.string.chat_notice_dictation_mic)
     val noDesktopVoice = stringResource(Res.string.chat_notice_no_desktop_voice)
     val noDesktopDictation = stringResource(Res.string.chat_notice_no_desktop_dictation)
@@ -493,8 +494,12 @@ fun ChatScreen(
     }
     val attachmentPicker = rememberAttachmentPicker(onPicked = viewModel::addAttachments, onError = viewModel::showAttachmentError)
     val microphone = rememberMicrophonePermission()
+    val microphoneCheck = rememberMicrophoneCheck()
+    val microphoneSettings = rememberMicrophoneSettings()
     val startVoiceChat = { ringback: Boolean ->
-        microphone.withMicrophone(onDenied = { notice = voiceNeedsMic }) {
+        // A refusal opens the voice screen saying the microphone is blocked, with the page that grants it: a
+        // notice that fades would leave the chat looking as though it had never heard the tap.
+        microphone.withMicrophone(onDenied = { viewModel.showMicrophoneBlocked() }) {
             viewModel.startVoiceChat(ringback)
         }
     }
@@ -511,6 +516,13 @@ fun ChatScreen(
         viewModel.onScreen(false)
         // Preserve the actual reading position and remember a turn still running while away.
         viewModel.markLooked()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        // Back from the page that grants the microphone, with it granted: the chat that couldn't listen starts, or
+        // listens again. Where the person comes back, that's all: nothing is asked here.
+        if (viewModel.voice.chat.value.blocked != null && microphoneCheck.granted()) {
+            if (!viewModel.voice.retryBlocked()) startVoiceChat(false)
+        }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
         viewModel.onScreen(true)
@@ -648,6 +660,8 @@ fun ChatScreen(
         onAttach = { if (isDesktop) attachmentPicker.pickFiles() else attachOpen = true },
         onDictate = toggleDictation,
         onVoiceChat = { startVoiceChat(false) },
+        onOpenMicSettings = microphoneSettings,
+        onRetryMic = { viewModel.voice.retryBlocked() },
         onOpenPets = { petsOpen = true },
         onOpenControl = viewModel::openControl,
         onViewImage = { viewing = it },
@@ -813,6 +827,10 @@ internal fun ChatView(
     onAttach: () -> Unit,
     onDictate: () -> Unit,
     onVoiceChat: () -> Unit,
+    /** The microphone is blocked: opens this app's permission page. */
+    onOpenMicSettings: () -> Unit = {},
+    /** The microphone is blocked and hears nothing: listen again. */
+    onRetryMic: () -> Unit = {},
     onOpenPets: () -> Unit,
     /** Opens the goal and loops sheet from the strip above the composer. */
     onOpenControl: () -> Unit = {},
@@ -1248,6 +1266,8 @@ internal fun ChatView(
                         onAttach = onAttach,
                         onDictate = onDictate,
                         onVoiceChat = onVoiceChat,
+                        onOpenMicSettings = onOpenMicSettings,
+                        onRetryMic = onRetryMic,
                         onOpenControl = onOpenControl,
                         voiceFull = voiceFull,
                         onExpandVoice = { voiceFolded = false },
@@ -1291,6 +1311,8 @@ internal fun ChatView(
                     actions.stopVoiceChat()
                 },
                 onSendNow = actions::sendVoiceNow,
+                onOpenMicSettings = onOpenMicSettings,
+                onRetryMic = onRetryMic,
             )
         }
         // Files dragged over the chat: it says where they go before they're let go, as a desktop app does.
@@ -1363,6 +1385,9 @@ private fun ColumnScope.Dock(
     onAttach: () -> Unit,
     onDictate: () -> Unit,
     onVoiceChat: () -> Unit,
+    /** The microphone is blocked: opens this app's permission page, or listens again once granted. */
+    onOpenMicSettings: () -> Unit = {},
+    onRetryMic: () -> Unit = {},
     /** Opens the goal and loops sheet from the strip above the composer. */
     onOpenControl: () -> Unit,
     /** The voice chat is open over the whole screen. */
@@ -1424,6 +1449,8 @@ private fun ColumnScope.Dock(
                 onExpand = onExpandVoice,
                 onSendNow = actions::sendVoiceNow,
                 onHeadsetMic = actions::toggleHeadsetMic,
+                onOpenMicSettings = onOpenMicSettings,
+                onRetryMic = onRetryMic,
             )
         }
     } else {

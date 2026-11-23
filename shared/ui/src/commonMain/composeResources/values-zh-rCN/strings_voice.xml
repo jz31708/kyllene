@@ -2,6 +2,14 @@
 <resources>
     <string name="voice_chat">语音对话</string>
     <string name="voice_connecting">正在连接…</string>
+    <string name="voice_mic_blocked">麦克风被阻止</string>
+    <string name="voice_mic_blocked_hint">允许使用麦克风才能说话</string>
+    <string name="voice_mic_silent">听不到你说话</string>
+    <string name="voice_mic_silent_hint">检查麦克风，然后重试</string>
+    <string name="voice_mic_open_settings">打开设置</string>
+    <string name="voice_mic_try_again">重试</string>
+    <string name="voice_use_headset_mic">使用耳机麦克风</string>
+    <string name="voice_use_phone_mic">使用手机麦克风</string>
     <string name="voice_muted">已静音</string>
     <string name="voice_hearing">正在听你说…</string>
     <string name="voice_listening">正在聆听…</string>

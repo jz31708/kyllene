@@ -26,6 +26,9 @@ import dev.hermeskotlin.core.voice.BargeInSettings
 import dev.hermeskotlin.core.voice.DeviceDictation
 import dev.hermeskotlin.core.voice.DeviceDictationUnavailable
 import dev.hermeskotlin.core.voice.LiveCalls
+import dev.hermeskotlin.core.voice.MicrophoneBlocked
+import dev.hermeskotlin.core.voice.MicrophoneCheck
+import dev.hermeskotlin.core.voice.MicrophoneSilent
 import dev.hermeskotlin.core.voice.ReadAloudVoices
 import dev.hermeskotlin.core.voice.InMemoryReadAloudVoices
 import dev.hermeskotlin.core.voice.ReadAloudControls
@@ -85,7 +88,13 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-enum class VoicePhase { Off, Connecting, Listening, Transcribing, Thinking, Speaking }
+enum class VoicePhase { Off, Connecting, Listening, Transcribing, Thinking, Speaking, Blocked }
+
+/**
+ * Why a voice chat isn't listening, when it can't: the app may not use the microphone, or the microphone sends
+ * nothing at all. Either way the chat says so and stays silent — no orb breathing, nothing to send.
+ */
+enum class MicrophoneBlock { Permission, Silence }
 
 data class VoiceChatState(
     val phase: VoicePhase = VoicePhase.Off,
@@ -93,6 +102,8 @@ data class VoiceChatState(
     val level: Float = 0f,
     /** Speech has been picked up in this turn, so a pause will send it. */
     val hearing: Boolean = false,
+    /** Why the chat isn't listening, while it can't; null whenever the microphone is usable. */
+    val blocked: MicrophoneBlock? = null,
     /** The last thing that went wrong; the conversation carries on where it can. */
     val error: String? = null,
     /** A GPT-Live call rather than Desktop's listen, send and read aloud. */
@@ -161,6 +172,8 @@ class VoiceController(
     private val deviceLock: DeviceLock = DeviceLock.None,
     /** Holds Read aloud up while Herald is out of sight; without it, leaving the app stops the reading. */
     private val readAloudKeepAlive: ReadAloudKeepAlive? = null,
+    /** Whether this app may open the microphone now; a host that asks nobody always may. */
+    private val microphone: MicrophoneCheck = MicrophoneCheck.Always,
     private val liveCalls: LiveCalls? = null,
 ) : PushedSpeechTarget {
     private val _chat = MutableStateFlow(VoiceChatState())
@@ -268,6 +281,13 @@ class VoiceController(
         ringback: Boolean = false,
     ) {
         if (chatJob?.isActive == true) return
+        // Nothing listens without the microphone: the screen says so, with the page that grants it, rather than an
+        // orb breathing at a microphone the app was never given. The chat isn't started at all, so no call is held.
+        if (!microphone.granted()) {
+            logMicrophoneBlocked("permission", "start")
+            _chat.value = VoiceChatState(VoicePhase.Blocked, blocked = MicrophoneBlock.Permission)
+            return
+        }
         cancelDictation()
         // The voice chat has the speaker now.
         stopReading()
@@ -485,9 +505,39 @@ class VoiceController(
 
     fun stopChat() {
         stoppedByUser = true
-        chatJob?.cancel()
+        val job = chatJob
         chatJob = null
         chainedAudio?.let { chainedAudio = null; it() }
+        // A chat that never started (a microphone that was blocked) has no job to end to put the screen back.
+        if (job == null) _chat.value = VoiceChatState() else job.cancel()
+    }
+
+    /**
+     * The microphone was refused before a chat started: its screen says so and offers the page that grants it,
+     * rather than a notice that fades and leaves the chat looking as though it had never been asked.
+     */
+    fun showMicrophoneBlocked() {
+        if (chatJob?.isActive == true) return
+        logMicrophoneBlocked("permission", "refused")
+        _chat.value = VoiceChatState(VoicePhase.Blocked, blocked = MicrophoneBlock.Permission)
+    }
+
+    /**
+     * Listens again after a microphone the chat couldn't use — the button on its screen, or coming back from the
+     * page that grants it. A chat still waiting says "listening" and its next listen opens the microphone.
+     * @return false when nothing was waiting (a chat blocked before it started has no call to resume).
+     */
+    fun retryBlocked(): Boolean {
+        if (_chat.value.blocked == null) return false
+        if (chatJob?.isActive != true) {
+            // Blocked before its call: nothing is listening, so the screen stays until the chat starts again.
+            if (_chat.value.blocked == MicrophoneBlock.Permission && !microphone.granted()) return false
+            _chat.value = VoiceChatState()
+            return false
+        }
+        logMicrophoneRetry(_chat.value.blocked?.name?.lowercase() ?: "unknown")
+        _chat.update { it.copy(phase = VoicePhase.Listening, blocked = null, level = 0f, hearing = false) }
+        return true
     }
 
     /** Cuts the reply being read aloud and listens again. */
@@ -844,8 +894,22 @@ class VoiceController(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _chat.update { it.copy(error = e.message ?: getString(Res.string.voice_error_microphone)) }
-                return Heard.Broken
+                // A microphone the app may not open, or one sending pure silence: neither is a turn, and neither
+                // should listen on for ever. The call stays up and the screen says which, with what fixes it.
+                val block = when (e) {
+                    is MicrophoneSilent -> MicrophoneBlock.Silence
+                    is MicrophoneBlocked -> MicrophoneBlock.Permission
+                    else -> null
+                }
+                if (block == null) {
+                    _chat.update { it.copy(error = e.message ?: getString(Res.string.voice_error_microphone)) }
+                    return Heard.Broken
+                }
+                logMicrophoneBlocked(block.name.lowercase(), "listen")
+                _chat.update { it.copy(phase = VoicePhase.Blocked, blocked = block, level = 0f, hearing = false) }
+                // Held here until the button or the permission page says the microphone is worth another try.
+                _chat.first { it.blocked == null }
+                continue
             }
             // Cut off by Mute: the sentence is dropped, and it listens afresh once unmuted.
             if (recording == null) continue

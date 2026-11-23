@@ -17,6 +17,7 @@ import dev.hermeskotlin.core.voice.WebRtcSpeaker
 import dev.hermeskotlin.core.voice.LinuxVoiceRecorder
 import dev.hermeskotlin.core.voice.WebRtcMicrophone
 import dev.hermeskotlin.core.voice.LiveCalls
+import dev.hermeskotlin.core.voice.MicrophoneCheck
 import dev.hermeskotlin.core.voice.LinuxLiveCall
 import dev.hermeskotlin.core.voice.WebRtcLivePeer
 import dev.hermeskotlin.core.voice.NoDeviceDictation
@@ -45,6 +46,8 @@ actual val platformModule: Module = module {
         else NoSpeechPlayer
     }
     single<DeviceDictation> { NoDeviceDictation }
+    // The desktop's recorder says itself when there's no microphone; nothing asks it for permission.
+    single<MicrophoneCheck> { MicrophoneCheck.Always }
     single { LiveCalls {
         if (nativeDesktopAudio()) {
             LinuxLiveCall { events -> WebRtcLivePeer(events, realAudio = true) }
