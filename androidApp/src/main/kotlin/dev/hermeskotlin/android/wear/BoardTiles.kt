@@ -1,5 +1,6 @@
 package dev.hermeskotlin.android.wear
 
+import android.util.Log
 import dev.hermeskotlin.core.speak.BoardCallBus
 import dev.hermeskotlin.core.speak.BoardCallSnapshot
 import dev.hermeskotlin.core.speak.PushedSpeechTargets
@@ -34,7 +35,12 @@ class BoardTiles(
     fun start() {
         // The wrist's mic button toggles the phone's mic, whichever call holds it; with no call on, it opens one.
         // Either way the Oppo records: the watch never opens a microphone of its own.
-        notes.mic = BoardMic { PushedSpeechTargets.current?.toggleMic() ?: calls.start() }
+        notes.mic = BoardMic {
+            val target = PushedSpeechTargets.current
+            Log.i(WatchBoardLog.TAG, "mic.toggle: target=${target != null} active=${target?.callActive} before=${BoardCallBus.state.value}")
+            if (target != null) target.toggleMic() else calls.start()
+            Log.i(WatchBoardLog.TAG, "mic.toggle: after=${BoardCallBus.state.value}")
+        }
         scope.launch {
             BoardCallBus.state.collect { snapshot -> publish(snapshot) }
         }
@@ -65,6 +71,7 @@ class BoardTiles(
             state = if (snapshot.active) snapshot.stateWord else "idle",
             detail = null,
         )
+        Log.i(WatchBoardLog.TAG, "publish board call=${BoardCallBus.state.value} fallback=${calls.fallback}")
         sync.publish(
             TilesState(revision = revision, tiles = listOf(life, board)),
             BoardState(

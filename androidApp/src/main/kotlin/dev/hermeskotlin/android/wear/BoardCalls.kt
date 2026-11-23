@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -43,17 +44,26 @@ class BoardCalls(
 
     /** What the watch asked: start its Board call, or hang it up. */
     fun requested(request: BoardCallRequest) {
-        if (request.stopping) PushedSpeechTargets.current?.hangUp() else start()
+        val target = PushedSpeechTargets.current
+        Log.i(TAG, "BoardCalls.requested ${request.action} id=${request.id} target=${target != null} active=${target?.callActive}")
+        if (request.stopping) {
+            target?.hangUp()
+            Log.i(TAG, "BoardCalls: hangUp done, target still=${PushedSpeechTargets.current != null}")
+        } else {
+            start()
+        }
     }
 
     /** Starts the phone's Board call: the voice chat of the Default Call Target, with the Oppo's microphone. */
     fun start() {
+        Log.i(TAG, "BoardCalls.start: visible=${visibility.visible.value}")
         if (visibility.visible.value) open() else notice()
     }
 
     /** Opens Kyllene on the call's chat; the app's own `hermes://voice-chat` link is what starts the call there. */
     private fun open() {
         val started = runCatching { context.startActivity(callIntent()) }.isSuccess
+        Log.i(TAG, "BoardCalls.open: started=$started")
         if (!started) notice()
     }
 
@@ -65,6 +75,7 @@ class BoardCalls(
      * sign it heard the wrist at all.
      */
     private fun notice() {
+        Log.i(TAG, "BoardCalls.notice: posting the open-oppo notification")
         fallback = FALLBACK_OPEN_OPPO
         val manager = NotificationManagerCompat.from(context)
         manager.createNotificationChannel(
@@ -92,6 +103,7 @@ class BoardCalls(
     }
 
     private companion object {
+        const val TAG = WatchBoardLog.TAG
         const val CHANNEL = "board_calls"
         const val NOTICE_ID = 4_120
         const val VOICE_CHAT_LINK = "hermes://voice-chat"

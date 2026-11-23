@@ -105,6 +105,7 @@ import dev.hermeskotlin.wear.board.RingColor
 import dev.hermeskotlin.wear.board.WearPhase
 import dev.hermeskotlin.wear.board.WearStateMachine
 import dev.hermeskotlin.wear.board.WatchHaptics
+import dev.hermeskotlin.wear.board.WatchLog
 import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.ReplyPhase
 import dev.hermeskotlin.wearlink.TilesState
@@ -990,6 +991,9 @@ fun BoardCallScreen(
     val ring = machine.current
     // The grammar's two answers the wrist feels: the phone opened its mic, or it let go.
     LaunchedEffect(ring.phase) {
+        if (lastPhase != ring.phase) {
+            WatchLog.phase("ring ${lastPhase ?: "start"} -> ${ring.phase} (capture=${call?.capture} mode=${call?.mode} connected=${call?.connected})")
+        }
         if (lastPhase != null && lastPhase != ring.phase) {
             when (ring.phase) {
                 WearPhase.RECORDING -> haptics.play(HapticPattern.MIC_OPEN)
@@ -1001,6 +1005,9 @@ fun BoardCallScreen(
     }
     // The phone's own line first, then what the call is doing: the floor, where it plays, or the fallback.
     val line: String = problem
+        ?: if (call?.muted == true) stringResource(R.string.wear_phone_muted)
+        else if (active) stringResource(R.string.wear_phone_listening)
+        else null
         ?: floor?.let { stringResource(R.string.wear_board_floor, it) }
         ?: call?.route
         ?: tile?.detail
@@ -1089,7 +1096,12 @@ private fun BoardRing(phase: WearPhase, onTap: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth(0.78f)
             .aspectRatio(1f)
-            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { at ->
+                    WatchLog.remote("ring tap at ${at.x.toInt()},${at.y.toInt()}")
+                    onTap()
+                })
+            },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.fillMaxSize()) {

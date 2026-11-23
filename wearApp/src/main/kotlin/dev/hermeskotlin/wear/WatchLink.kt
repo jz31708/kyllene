@@ -6,6 +6,7 @@ import androidx.wear.tiles.TileService
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
+import dev.hermeskotlin.wear.board.WatchLog
 import dev.hermeskotlin.wearlink.BoardCallRequest
 import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.CALL_EVENT_TYPES
@@ -327,7 +328,10 @@ class WatchLink(
      * Asks the phone to open or close its own microphone. The watch never opens one for the Board: this is the
      * whole of the mic toggle, a note with no words.
      */
-    fun togglePhoneMic() = note(QuickNote(UUID.randomUUID().toString(), boardId = store.board?.boardId))
+    fun togglePhoneMic() {
+        WatchLog.remote("QuickNote(blank) queued: the phone's mic toggle")
+        note(QuickNote(UUID.randomUUID().toString(), boardId = store.board?.boardId))
+    }
 
     /**
      * Asks the phone for its Board call: the Oppo opens its microphone and speaker, and the watch only shows
@@ -343,7 +347,12 @@ class WatchLink(
 
     private fun askBoardCall(request: BoardCallRequest) {
         _boardCallProblem.update { null }
-        scope.launch(main) { send(WearPaths.BOARD_CALL, WearJson.encode(request))?.let { failure -> _boardCallProblem.update { failure } } }
+        WatchLog.remote("BoardCallRequest ${request.action} queued id=${request.id}")
+        scope.launch(main) {
+            val failure = send(WearPaths.BOARD_CALL, WearJson.encode(request))
+            WatchLog.remote("BoardCallRequest ${request.action} sent result=${failure ?: "ok"}")
+            failure?.let { _boardCallProblem.update { it } }
+        }
     }
 
     private fun note(request: QuickNote) {
@@ -356,8 +365,10 @@ class WatchLink(
             }
         }
         scope.launch(main) {
-            send(WearPaths.BOARD_NOTES, WearJson.encode(request))?.let { failure ->
-                if (_note.value?.id == request.id) _note.value = NoteState(request.id, NoteStage.Failed, request.text, failure)
+            val failure = send(WearPaths.BOARD_NOTES, WearJson.encode(request))
+            WatchLog.remote("QuickNote sent id=${request.id} blank=${request.text.isBlank()} result=${failure ?: "ok"}")
+            failure?.let {
+                if (_note.value?.id == request.id) _note.value = NoteState(request.id, NoteStage.Failed, request.text, it)
             }
         }
     }
@@ -703,7 +714,10 @@ class WatchLink(
                 }
                 WearPaths.RING_END -> WearJson.decode<RingEnd>(data)?.let { rings.stop(it.requestId) }
                 WearPaths.TILES -> WearJson.decode<TilesState>(data)?.let(::onTiles)
-                WearPaths.BOARD -> WearJson.decode<BoardState>(data)?.let(store::setBoard)
+                WearPaths.BOARD -> WearJson.decode<BoardState>(data)?.let {
+                    WatchLog.phase("phone view active=${it.call?.active} muted=${it.call?.muted} capture=${it.call?.capture} mode=${it.call?.mode} floor=${it.floor} fallback=${it.call?.fallback}")
+                    store.setBoard(it)
+                }
                 WearPaths.BOARD_SPEECH -> onBoardSpeech(data)
                 WearPaths.BOARD_NOTE_SAVED -> WearJson.decode<NoteSaved>(data)?.let(::onNoteSaved)
                 WearPaths.STATUS -> WearJson.decode<PhoneStatus>(data)?.let { status ->

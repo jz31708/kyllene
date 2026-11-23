@@ -1,6 +1,7 @@
 package dev.hermeskotlin.android.wear
 
 import android.content.Context
+import android.util.Log
 import dev.hermeskotlin.wearlink.NoteSaved
 import dev.hermeskotlin.wearlink.QuickNote
 import dev.hermeskotlin.wearlink.WearJson
@@ -75,7 +76,9 @@ class BoardNotes(
      */
     suspend fun receive(note: QuickNote): NoteSaved = withContext(Dispatchers.IO) {
         if (note.text.isBlank()) {
-            runCatching { mic.toggle() }
+            Log.i(WatchBoardLog.TAG, "BoardNotes.receive id=${note.id}: blank, toggling the phone's mic")
+            val outcome = runCatching { mic.toggle() }
+            Log.i(WatchBoardLog.TAG, "BoardNotes.receive id=${note.id}: mic.toggle done, error=${outcome.exceptionOrNull()?.message}")
             return@withContext NoteSaved(note.id, saved = true, pendingNotes = pending())
         }
         if (synchronized(lock) { note.id in seen }) {

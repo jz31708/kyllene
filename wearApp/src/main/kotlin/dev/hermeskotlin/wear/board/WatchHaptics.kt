@@ -36,6 +36,7 @@ class WatchHaptics(context: Context) {
     }
 
     fun play(pattern: HapticPattern) {
+        WatchLog.haptic("fire ${pattern.wire} at ${System.currentTimeMillis()}")
         val device = vibrator?.takeIf { it.hasVibrator() } ?: return
         val (timings, amplitudes) = waveform(pattern)
         runCatching { device.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1)) }

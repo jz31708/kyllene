@@ -1,5 +1,6 @@
 package dev.hermeskotlin.android.wear
 
+import android.util.Log
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
@@ -93,12 +94,16 @@ class WearBridgeService : WearableListenerService() {
             WearPaths.TILES -> boardTiles.republish().also { board.requested(node) }
             // A quick note, or a mic toggle when it has no words. The watch never sends audio for the Board.
             WearPaths.BOARD_NOTES -> WearJson.decode<QuickNote>(event.data)?.let { note ->
+                Log.i(WatchBoardLog.TAG, "BOARD_NOTES from $node id=${note.id} blank=${note.text.isBlank()}")
                 scope.launch { board.noteSaved(node, notes.receive(note), micAction = note.text.isBlank()) }
             }
             // Evidence that the cue went off, kept for tuning the next one; it gates nothing.
             WearPaths.BOARD_HAPTIC -> WearJson.decode<HapticFired>(event.data)?.let(board::hapticFired)
             // The wrist's start or stop of the phone's own Board call: the Oppo records, the watch asks.
-            WearPaths.BOARD_CALL -> WearJson.decode<BoardCallRequest>(event.data)?.let(boardCalls::requested)
+            WearPaths.BOARD_CALL -> WearJson.decode<BoardCallRequest>(event.data)?.let { request ->
+                Log.i(WatchBoardLog.TAG, "BOARD_CALL from $node action=${request.action} id=${request.id}")
+                boardCalls.requested(request)
+            }
         }
     }
 
