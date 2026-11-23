@@ -69,6 +69,8 @@ class HermesApplication : Application() {
         PebbleApps.choose(this, koin.get())
         slowHeartbeatWhenUnused(koin.get(), koin.get(), koin.get(), koin.get(), koin.get())
         koin.get<WearRequests>().start()
+        // SPIKE: the self-managed phone account telecom brings the wrist's calls to.
+        dev.hermeskotlin.android.telecom.TelecomSpike.ensureAccount(this)
         koin.get<PebbleRequests>().start()
         koin.get<WatchRinger>().start()
         // Wear OS watches and Pebbles ring along with the phone.

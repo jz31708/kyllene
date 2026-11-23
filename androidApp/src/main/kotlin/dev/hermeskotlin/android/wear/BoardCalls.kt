@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import dev.hermeskotlin.android.HeraldActivity
 import dev.hermeskotlin.android.R
 import dev.hermeskotlin.android.notify.AppVisibility
+import dev.hermeskotlin.android.telecom.TelecomSpike
 import dev.hermeskotlin.core.speak.PushedSpeechTargets
 import dev.hermeskotlin.wearlink.BoardCallRequest
 
@@ -54,10 +55,24 @@ class BoardCalls(
         }
     }
 
-    /** Starts the phone's Board call: the voice chat of the Default Call Target, with the Oppo's microphone. */
+    /**
+     * Starts the phone's Board call: the voice chat of the Default Call Target, with the Oppo's microphone.
+     *
+     * The spike puts the ask to telecom first, as a call on a self-managed account, so the phone is in a call the
+     * system knows about — the measurement is whether its microphone works from there with the screen locked
+     * (`WT-CS`, `docs/board/call-while-locked.md`). The app's own way in is unchanged below it.
+     */
     fun start() {
         Log.i(TAG, "BoardCalls.start: visible=${visibility.visible.value}")
-        if (visibility.visible.value) open() else notice()
+        if (visibility.visible.value) {
+            // In sight, the app's own way in is the one being tested elsewhere; the spike doesn't touch it.
+            open()
+            return
+        }
+        // Out of sight — a pocket, a locked screen — is the case the spike is for: telecom is asked for a real call.
+        val reported = TelecomSpike.reportIncoming(context, reason = "watch")
+        Log.i(TAG, "BoardCalls.start: telecom reported=$reported")
+        notice()
     }
 
     /** Opens Kyllene on the call's chat; the app's own `hermes://voice-chat` link is what starts the call there. */
