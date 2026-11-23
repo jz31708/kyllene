@@ -2,6 +2,9 @@ package dev.hermeskotlin.wear
 
 import android.content.Context
 import androidx.core.content.edit
+import androidx.wear.tiles.TileService
+import dev.hermeskotlin.wearlink.BoardState
+import dev.hermeskotlin.wearlink.TilesState
 import dev.hermeskotlin.wearlink.WatchScope
 import dev.hermeskotlin.wearlink.WatchAccent
 import dev.hermeskotlin.wearlink.WearJson
@@ -18,6 +21,7 @@ data class WatchChatChoice(val id: String?, val title: String?, val model: Strin
 /** What the watch remembers between launches: its chat, whether replies are read aloud, and the last reply (for the tile). */
 class WatchStore(context: Context) {
 
+    private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("herald_watch", Context.MODE_PRIVATE)
 
     var phoneScope: WatchScope?
@@ -117,7 +121,54 @@ class WatchStore(context: Context) {
         get() = prefs.getString(LAST_REPLY, null)
         set(value) = prefs.edit { putString(LAST_REPLY, value?.take(MAX_KEPT)) }
 
+    private val _tiles = MutableStateFlow(prefs.getString(TILES, null)?.let { WearJson.decode<TilesState>(it.encodeToByteArray()) })
+
+    /** What the phone last published for the Life and Board tiles: a tile renders this instead of asking. */
+    val tilesFlow: StateFlow<TilesState?> = _tiles.asStateFlow()
+    val tiles: TilesState? get() = _tiles.value
+
+    /**
+     * Keeps [value] when it's newer than what's kept, and has both tiles redraw; false for an older or repeated
+     * one. The phone's [TilesState.revision] only grows, so a message that overtook another can't undo it.
+     */
+    @Synchronized
+    fun setTiles(value: TilesState): Boolean {
+        val kept = _tiles.value
+        if (kept != null && value.revision <= kept.revision) return false
+        _tiles.value = value
+        prefs.edit { putString(TILES, WearJson.encode(value).decodeToString()) }
+        redrawTiles()
+        return true
+    }
+
+    private val _board = MutableStateFlow(prefs.getString(BOARD, null)?.let { WearJson.decode<BoardState>(it.encodeToByteArray()) })
+
+    /** The Board's seats and floor as the phone last published them. */
+    val boardFlow: StateFlow<BoardState?> = _board.asStateFlow()
+    val board: BoardState? get() = _board.value
+
+    /** Keeps [value] when it's newer; the Board tile shows the floor, so both tiles redraw. */
+    @Synchronized
+    fun setBoard(value: BoardState): Boolean {
+        val kept = _board.value
+        if (kept != null && value.revision <= kept.revision) return false
+        _board.value = value
+        prefs.edit { putString(BOARD, WearJson.encode(value).decodeToString()) }
+        redrawTiles()
+        return true
+    }
+
+    /** Asks for all three tiles again: there is no "all" in the API, so each is named. */
+    private fun redrawTiles() = runCatching {
+        val updater = TileService.getUpdater(context)
+        updater.requestUpdate(LifeTileService::class.java)
+        updater.requestUpdate(BoardTileService::class.java)
+        updater.requestUpdate(AskTileService::class.java)
+    }
+
     private companion object {
+        const val TILES = "tiles_state"
+        const val BOARD = "board_state"
         const val PHONE_SCOPE = "phone_scope"
         const val PHONE_NODE = "phone_node"
         const val CHAT_SCOPE = "chat_scope"

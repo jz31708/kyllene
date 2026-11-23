@@ -40,6 +40,9 @@ interface ChatActions {
 
     fun interrupt()
 
+    /** The voice panel's headset toggle: the headset's mic and route, or the phone's. */
+    fun toggleHeadsetMic() {}
+
     fun removeAttachment(id: String)
 
     /** Adds a comment on [anchor]'s selection to the next send; returns its id. */

@@ -230,6 +230,20 @@ class JsonRpcClient(
         put("result", result)
     })
 
+    /**
+     * Sends a JSON-RPC notification: a method call with no id, so no reply is expected. The Board uses it for
+     * `speak_ack`, the evidence that a pushed line was heard (`docs/board/server-push.md` §4); it must never
+     * block a call or fail one — an ack that can't go out is dropped.
+     */
+    suspend fun notify(method: String, params: JsonObject = JsonObject(emptyMap())) {
+        closedWith?.let { throw it }
+        sendText(encode(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("method", method)
+            put("params", params)
+        }))
+    }
+
     suspend fun close() = transport.close()
 
     private suspend fun handleLine(line: String, scope: CoroutineScope) {

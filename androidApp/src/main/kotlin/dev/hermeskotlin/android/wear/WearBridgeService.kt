@@ -14,6 +14,8 @@ import dev.hermeskotlin.wearlink.CallEnd
 import dev.hermeskotlin.wearlink.CallEvents
 import dev.hermeskotlin.wearlink.ChatListRequest
 import dev.hermeskotlin.wearlink.CallStart
+import dev.hermeskotlin.wearlink.HapticFired
+import dev.hermeskotlin.wearlink.QuickNote
 import dev.hermeskotlin.wearlink.RecordedAsk
 import dev.hermeskotlin.wearlink.PhoneStatusRequest
 import dev.hermeskotlin.wearlink.RingEnd
@@ -47,10 +49,13 @@ class WearBridgeService : WearableListenerService() {
     private val notifier: ChatNotifier by inject()
     private val ringer: WatchRinger by inject()
     private val pebbleRequests: PebbleRequests by inject()
+    private val board: BoardSync by inject()
+    private val notes: BoardNotes by inject()
 
     override fun onMessageReceived(event: MessageEvent) {
         val node = event.sourceNodeId
         ringer.heardFrom(node)
+        board.heardFrom(node)
         when (event.path) {
             WearPaths.ASK, WearPaths.BOT_ASK -> WearJson.decode<WatchAsk>(event.data)?.let {
                 if (event.path == WearPaths.BOT_ASK && it.botProfile.isNullOrBlank()) return
@@ -73,11 +78,21 @@ class WearBridgeService : WearableListenerService() {
             WearPaths.CHATS -> { relay.chats(node, WearJson.decode<ChatListRequest>(event.data)?.requestId); keepUp() }
             WearPaths.STATUS -> {
                 val request = WearJson.decode<PhoneStatusRequest>(event.data)
+                // The tiles ride along: one more message, and it anchors the watch's clock for the speech cue.
+                board.status(node)
                 scope.launch {
                     val accent = watchAccent(settings.settings.filterNotNull().first().accent)
                     relay.status(node, request?.botProfile, request?.requestId, request?.scope, accent.updateFor(request?.accentRevision))
                 }
             }
+            // The watch asking for the tiles it already keeps: the answer's round trip is the clock anchor.
+            WearPaths.TILES -> board.requested(node)
+            // A quick note, or a mic toggle when it has no words. The watch never sends audio for the Board.
+            WearPaths.BOARD_NOTES -> WearJson.decode<QuickNote>(event.data)?.let { note ->
+                scope.launch { board.noteSaved(node, notes.receive(note), micAction = note.text.isBlank()) }
+            }
+            // Evidence that the cue went off, kept for tuning the next one; it gates nothing.
+            WearPaths.BOARD_HAPTIC -> WearJson.decode<HapticFired>(event.data)?.let(board::hapticFired)
         }
     }
 

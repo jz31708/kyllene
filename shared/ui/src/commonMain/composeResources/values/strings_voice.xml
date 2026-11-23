@@ -83,4 +83,6 @@
     <string name="call_thinking">Thinking</string>
     <string name="call_working">Working: %1$s</string>
     <string name="call_speaking">Speaking</string>
+    <string name="voice_use_headset_mic">Use headset mic</string>
+    <string name="voice_use_phone_mic">Use phone mic</string>
 </resources>

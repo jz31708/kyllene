@@ -102,6 +102,7 @@ internal fun VoicePanel(
     onEnd: () -> Unit,
     onExpand: () -> Unit,
     onSendNow: () -> Unit = {},
+    onHeadsetMic: () -> Unit = {},
 ) {
     val shape = RoundedCornerShape(28.dp)
     val page = Theme[colors][background]
@@ -190,6 +191,20 @@ internal fun VoicePanel(
                 else -> Spacer(Modifier.size(60.dp))
             }
         }
+        if (!state.live && state.phase != VoicePhase.Connecting) {
+            // The explicit HFP mode for wind or a bike: otherwise the phone records and playback stays on A2DP.
+            UnstyledButton(onClick = onHeadsetMic, indication = null) {
+                Text(
+                    listOfNotNull(
+                        stringResource(if (state.headsetMic) Res.string.voice_use_phone_mic else Res.string.voice_use_headset_mic),
+                        state.route,
+                    ).joinToString(" \u00b7 "),
+                    style = Theme[typography][bodySmall],
+                    color = Theme[colors][textTertiary],
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
     }
 }
 
@@ -249,7 +264,7 @@ private fun WorkingChip(tool: String) {
         Spinner(Modifier.size(12.dp))
         Text(
             tool,
-            style = Theme[typography][caption],
+            style = Theme[typography][bodySmall],
             color = Theme[colors][textSecondary],
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

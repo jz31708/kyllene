@@ -193,6 +193,30 @@ class SpeakQueueTest {
     }
 
     @Test
+    fun `a speak event over the socket is the same item as a push`() {
+        val payload = kotlinx.serialization.json.buildJsonObject {
+            put("id", kotlinx.serialization.json.JsonPrimitive("ev-1"))
+            put("bot", kotlinx.serialization.json.JsonPrimitive("board"))
+            put("text", kotlinx.serialization.json.JsonPrimitive(" Two decisions wait. "))
+            put("priority", kotlinx.serialization.json.JsonPrimitive("fyi"))
+            put("rev", kotlinx.serialization.json.JsonPrimitive(9L))
+            put("expires_on_rev", kotlinx.serialization.json.JsonPrimitive(9L))
+        }
+        val item = SpeakItem.fromEvent(PushMessage.SPEAK, payload)
+        assertEquals("ev-1", item?.id)
+        assertEquals("board", item?.seat)
+        assertEquals("Two decisions wait.", item?.text)
+        assertEquals(SpeakPriority.Fyi, item?.priority)
+        assertEquals(9L, item?.expiresOnRev)
+        assertNull(SpeakItem.fromEvent(PushMessage.BOT_MESSAGE, payload))
+        // Without an id it can be neither deduped nor acknowledged.
+        val noId = kotlinx.serialization.json.buildJsonObject {
+            put("text", kotlinx.serialization.json.JsonPrimitive("Hi"))
+        }
+        assertNull(SpeakItem.fromEvent(PushMessage.SPEAK, noId))
+    }
+
+    @Test
     fun `a corrected answer only says what was not heard`() {
         assertEquals("and the queue is empty.", SpeakText.remainder("Two decisions wait and the queue is empty.", "Two decisions wait"))
         assertTrue(SpeakText.continues("Two decisions wait and the queue is empty.", "Two decisions wait"))

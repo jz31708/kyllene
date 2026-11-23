@@ -93,7 +93,9 @@ import androidx.wear.compose.material3.timeTextSeparator
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.ReplyPhase
+import dev.hermeskotlin.wearlink.TilesState
 import dev.hermeskotlin.wearlink.WatchAccent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -856,6 +858,105 @@ private fun SettingsScreen(link: WatchLink, store: WatchStore) {
     }
 }
 
+/**
+ * The Board's quick note, behind the tile's "Note" chip: the Board's state word and who holds the floor, a button
+ * that dictates a note on the wrist, and one for the phone's microphone. The watch never opens a microphone for
+ * the Board, so there is no recording here: the system's recognizer gives the words.
+ */
+@Composable
+fun BoardNoteScreen(
+    board: BoardState?,
+    tiles: TilesState?,
+    note: NoteState?,
+    error: String?,
+    onNote: () -> Unit,
+    onMic: () -> Unit,
+) {
+    val tile = tiles?.tile(BOARD_TILE)
+    val floor = board?.floor?.let { id -> board.seats.firstOrNull { it.id == id }?.label ?: id }
+    val pending = board?.pendingNotes ?: 0
+    val line = when {
+        floor != null -> stringResource(R.string.wear_board_floor, floor)
+        pending > 0 -> stringResource(R.string.wear_board_notes_waiting, pending)
+        else -> tile?.detail ?: stringResource(R.string.wear_tile_waiting)
+    }
+    val noteLine = when (note?.stage) {
+        NoteStage.Sending -> stringResource(R.string.wear_note_saving)
+        NoteStage.Saved -> if (note.text.isBlank()) stringResource(R.string.wear_mic_toggled) else stringResource(R.string.wear_note_saved)
+        NoteStage.Failed -> note.detail ?: stringResource(R.string.wear_note_failed)
+        null -> stringResource(R.string.wear_note_hint)
+    }
+    val listState = rememberTransformingLazyColumnState()
+    ScreenScaffold(scrollState = listState, modifier = Modifier.halo(OrbMood.Idle, MaterialTheme.colorScheme.primaryContainer)) { contentPadding ->
+        TransformingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+            item {
+                Text(
+                    tile?.title ?: stringResource(R.string.wear_board_tile_default),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                    style = geist(17, FontWeight.SemiBold),
+                    textAlign = TextAlign.Center,
+                )
+            }
+            item {
+                Text(
+                    boardStateWord(tile?.state),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = geist(13, FontWeight.Medium, MaterialTheme.colorScheme.primary),
+                    textAlign = TextAlign.Center,
+                )
+            }
+            item {
+                Text(
+                    line,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    style = geist(12, color = Muted),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item {
+                Button(
+                    onClick = onNote,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                    label = { Text(stringResource(R.string.wear_note), style = geist(15, FontWeight.Medium), maxLines = 1) },
+                    secondaryLabel = { Text(noteLine, style = geist(11, color = MaterialTheme.colorScheme.onPrimaryContainer), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+            }
+            item {
+                Button(
+                    onClick = onMic,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Text1, secondaryContentColor = Muted),
+                    label = { Text(stringResource(R.string.wear_mic), style = geist(14, FontWeight.Medium), maxLines = 1) },
+                    secondaryLabel = { Text(stringResource(R.string.wear_mic_toggle_hint), style = geist(11, color = Text2), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+            }
+            error?.let {
+                item {
+                    Text(
+                        it,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                        style = geist(12, color = Danger),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The Board's state word in the watch's language; an unrecognised one is shown as the phone sent it. */
+@Composable
+private fun boardStateWord(state: String?): String = when (state) {
+    "listening" -> stringResource(R.string.wear_state_listening)
+    "live" -> stringResource(R.string.wear_state_live)
+    "muted" -> stringResource(R.string.wear_state_muted)
+    "idle", null -> stringResource(R.string.wear_state_idle)
+    else -> state
+}
+
 @Composable
 private fun VoiceSwitch(label: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     SwitchButton(
@@ -915,5 +1016,6 @@ internal fun activityLine(phase: ReplyPhase, activity: String?): WatchLine = act
 }
 
 private const val TALK = "talk"
+private const val BOARD_TILE = "board"
 private const val CHATS = "chats"
 private const val SETTINGS = "settings"

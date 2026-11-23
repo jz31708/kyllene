@@ -207,4 +207,7 @@
     <string name="phone_place_not_accepted">it wasn’t accepted</string>
     <string name="phone_place_no_reach">Kyllene couldn’t reach the gateway</string>
     <string name="phone_place_refused">the gateway refused it</string>
+    <string name="share_to_board">Kyllene Board: save to Board</string>
+    <string name="share_saved">Saved to your words</string>
+    <string name="share_queued">Kept on the phone; it will reach the Board when it can</string>
 </resources>

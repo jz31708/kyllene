@@ -6,6 +6,7 @@ import androidx.wear.tiles.TileService
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
+import dev.hermeskotlin.wearlink.BoardState
 import dev.hermeskotlin.wearlink.CALL_EVENT_TYPES
 import dev.hermeskotlin.wearlink.InOrder
 import dev.hermeskotlin.wearlink.CallEnd
@@ -15,14 +16,19 @@ import dev.hermeskotlin.wearlink.CallStart
 import dev.hermeskotlin.wearlink.CallUpdate
 import dev.hermeskotlin.wearlink.ChatList
 import dev.hermeskotlin.wearlink.ChatListRequest
+import dev.hermeskotlin.wearlink.NoteSaved
 import dev.hermeskotlin.wearlink.PhoneStatus
 import dev.hermeskotlin.wearlink.PhoneStatusRequest
+import dev.hermeskotlin.wearlink.QuickNote
 import dev.hermeskotlin.wearlink.RecordedAsk
 import dev.hermeskotlin.wearlink.ReplyPhase
 import dev.hermeskotlin.wearlink.ReplySpeech
 import dev.hermeskotlin.wearlink.ReplyUpdate
 import dev.hermeskotlin.wearlink.RingEnd
 import dev.hermeskotlin.wearlink.RingOn
+import dev.hermeskotlin.wearlink.SeatSpeech
+import dev.hermeskotlin.wearlink.TilesRequest
+import dev.hermeskotlin.wearlink.TilesState
 import dev.hermeskotlin.wearlink.WatchRing
 import dev.hermeskotlin.wearlink.WatchAsk
 import dev.hermeskotlin.wearlink.WatchScope
@@ -92,6 +98,20 @@ data class WatchCallState(
     val active: Boolean get() = stage != CallStage.Ended
 }
 
+/** A note taken on the wrist, and where the phone has it: saved means kept there before anything acts on it. */
+data class NoteState(val id: String, val stage: NoteStage, val text: String, val detail: String? = null)
+
+enum class NoteStage {
+    /** On its way to the phone, or waiting for its answer. */
+    Sending,
+
+    /** The phone kept it (or, for a mic toggle, did that). */
+    Saved,
+
+    /** It didn't go, or the phone refused it; [NoteState.detail] says why. */
+    Failed,
+}
+
 /** How the phone stands, for what the watch can offer. */
 enum class PhoneState {
     Unknown,
@@ -156,6 +176,21 @@ class WatchLink(
     private val _call = MutableStateFlow<WatchCallState?>(null)
     val call: StateFlow<WatchCallState?> = _call.asStateFlow()
 
+    /** The last note from the wrist and where the phone has it; the note screen shows it. */
+    private val _note = MutableStateFlow<NoteState?>(null)
+    val note: StateFlow<NoteState?> = _note.asStateFlow()
+    private var noteWatchdog: Job? = null
+
+    /** The phone's clock against this one, told by the round trips the tiles and status replies make. */
+    internal val boardClock = BoardClock()
+    private var tilesAskedAt: Long? = null
+    private var statusAskedAt: Long? = null
+
+    /** The 300 ms cue before a seat speaks; it reports what it did, and asks for nothing. */
+    val haptics: BoardHaptics = boardHaptics(context, boardClock) { fired ->
+        scope.launch { send(WearPaths.BOARD_HAPTIC, WearJson.encode(fired)) }
+    }
+
     // The call's state is the main thread's alone: the screen, the phone's messages and the call itself meet there.
     private val main = Dispatchers.Main.immediate
     private var watchCall: WatchCall? = null
@@ -186,6 +221,8 @@ class WatchLink(
         profileChecked = false
         try {
             val chat = store.chat.value
+            // The phone answers a status ask with its tiles too: this trip is what anchors the speech cue's clocks.
+            statusAskedAt = System.currentTimeMillis()
             if (send(WearPaths.STATUS, WearJson.encode(PhoneStatusRequest(chat.botProfile, id, chat.scope, store.accent.value?.revision))) { statusRequest?.first == id } != null) {
                 _chats.value = null
                 return@withContext false
@@ -205,6 +242,8 @@ class WatchLink(
         _liveVoice.value = false
         _chats.value = null
         listRequest = null
+        haptics.cancelAll()
+        clearNote()
         store.setChat(null, null, scope = next)
         store.phoneScope = next
         store.phoneNode = phoneNode
@@ -266,6 +305,55 @@ class WatchLink(
         if (now.running || now.update.speech == ReplySpeech.Coming) {
             scope.launch { send(WearPaths.STOP, WearJson.encode(WatchStop(now.askId))) }
         }
+    }
+
+    /** Asks the phone for its tiles and its clock; the round trip that answers anchors the speech cue. */
+    fun refreshTiles() {
+        val id = UUID.randomUUID().toString()
+        val sent = System.currentTimeMillis()
+        tilesAskedAt = sent
+        scope.launch(main) { send(WearPaths.TILES, WearJson.encode(TilesRequest(id, sent))) }
+    }
+
+    /** A note typed or dictated on the wrist: the phone keeps it, and answers that it is saved. */
+    fun sendNote(text: String) = note(QuickNote(UUID.randomUUID().toString(), text.trim(), store.board?.boardId))
+
+    /**
+     * Asks the phone to open or close its own microphone. The watch never opens one for the Board: this is the
+     * whole of the mic toggle, a note with no words.
+     */
+    fun togglePhoneMic() = note(QuickNote(UUID.randomUUID().toString(), boardId = store.board?.boardId))
+
+    private fun note(request: QuickNote) {
+        _note.value = NoteState(request.id, NoteStage.Sending, request.text)
+        noteWatchdog?.cancel()
+        noteWatchdog = scope.launch(main) {
+            delay(NOTE_ANSWER_WITHIN_MS)
+            if (_note.value?.id == request.id && _note.value?.stage == NoteStage.Sending) {
+                _note.value = NoteState(request.id, NoteStage.Failed, request.text, say(R.string.wear_phone_no_answer))
+            }
+        }
+        scope.launch(main) {
+            send(WearPaths.BOARD_NOTES, WearJson.encode(request))?.let { failure ->
+                if (_note.value?.id == request.id) _note.value = NoteState(request.id, NoteStage.Failed, request.text, failure)
+            }
+        }
+    }
+
+    /** Puts the note's last state away when the screen closes. */
+    fun clearNote() {
+        noteWatchdog?.cancel()
+        _note.value = null
+    }
+
+    /**
+     * A seat's line: arms the 300 ms cue straight away. Called from the listener's own thread so a cue isn't
+     * waiting behind the app's queue; nothing about the speech itself waits on this.
+     */
+    fun onBoardSpeech(data: ByteArray) {
+        val speech = WearJson.decode<SeatSpeech>(data) ?: return
+        // No round trip has anchored the clocks yet: ask now, so the next line can be cued on time.
+        if (haptics.onSpeech(speech) == BoardHaptics.Result.DroppedUnanchored) refreshTiles()
     }
 
     /**
@@ -592,6 +680,10 @@ class WatchLink(
                     }
                 }
                 WearPaths.RING_END -> WearJson.decode<RingEnd>(data)?.let { rings.stop(it.requestId) }
+                WearPaths.TILES -> WearJson.decode<TilesState>(data)?.let(::onTiles)
+                WearPaths.BOARD -> WearJson.decode<BoardState>(data)?.let(store::setBoard)
+                WearPaths.BOARD_SPEECH -> onBoardSpeech(data)
+                WearPaths.BOARD_NOTE_SAVED -> WearJson.decode<NoteSaved>(data)?.let(::onNoteSaved)
                 WearPaths.STATUS -> WearJson.decode<PhoneStatus>(data)?.let { status ->
                     if (status.accent?.let(store::setAccent) == true) TileService.getUpdater(context).requestUpdate(AskTileService::class.java)
                     val pending = statusRequest
@@ -631,6 +723,32 @@ class WatchLink(
         scope.launch(main) {
             if ((sourceNode == null || sourceNode == phoneNode) && _turn.value?.askId == clip.askId && clip.askId != silenced) speech.clip(clip.askId, clip.index, clip.count, clip.mimeType, bytes)
         }
+    }
+
+    /**
+     * The phone's tiles, and its clock at the moment they went out. If one of the watch's own asks is what
+     * brought them, that round trip anchors the two clocks: the phone is taken to have answered in the middle,
+     * so only a trip no longer than [CLOCK_ASK_WITHIN_MS] is trusted.
+     */
+    private fun onTiles(state: TilesState) {
+        val now = System.currentTimeMillis()
+        val asked = listOfNotNull(tilesAskedAt, statusAskedAt).filter { it <= now && now - it <= CLOCK_ASK_WITHIN_MS }.maxOrNull()
+        val sent = state.sentEpochMs
+        if (asked != null && sent != null) boardClock.anchor(asked, now, sent)
+        tilesAskedAt = null
+        store.setTiles(state)
+    }
+
+    private fun onNoteSaved(saved: NoteSaved) {
+        val shown = _note.value ?: return
+        if (saved.noteId != shown.id) return
+        noteWatchdog?.cancel()
+        _note.value = NoteState(
+            id = shown.id,
+            stage = if (saved.saved) NoteStage.Saved else NoteStage.Failed,
+            text = shown.text,
+            detail = saved.error,
+        )
     }
 
     private fun onReply(update: ReplyUpdate) {
@@ -736,6 +854,10 @@ class WatchLink(
         private const val DROP_GRACE_MS = 2_000L
         private const val ANSWER_TRIES = 3
         private const val ANSWER_AGAIN_MS = 1_000L
+
+        /** The longest round trip a clock anchor trusts; a slower one says more about a queue than the clocks. */
+        private const val CLOCK_ASK_WITHIN_MS = 2_000L
+        private const val NOTE_ANSWER_WITHIN_MS = 20_000L
     }
 }
 

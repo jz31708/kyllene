@@ -1482,6 +1482,9 @@ class ChatViewModel(
 
     override fun toggleVoiceMute() = voice.toggleMute()
 
+
+    override fun toggleHeadsetMic() = voice.toggleHeadsetMic()
+
     override fun dismissVoiceChatError() = voice.dismissChatError()
 
     override fun dismissDictationError() = voice.dismissDictationError()

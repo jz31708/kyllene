@@ -1,6 +1,5 @@
 package dev.hermeskotlin.wear
 
-import androidx.concurrent.futures.CallbackToFutureAdapter
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
 import androidx.wear.protolayout.DimensionBuilders.dp
@@ -9,41 +8,29 @@ import androidx.wear.protolayout.DimensionBuilders.sp
 import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.ModifiersBuilders
 import androidx.wear.protolayout.ResourceBuilders
-import androidx.wear.protolayout.TimelineBuilders
 import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
-import androidx.wear.tiles.TileService
 import com.google.common.util.concurrent.ListenableFuture
+import dev.hermeskotlin.wear.tiles.CallTileService
+import dev.hermeskotlin.wear.tiles.softRing
 
 /**
  * The "Call Hermes" tile: a call action using the phone’s default target, and the first lines of the last reply. Updated when
  * a reply comes in ([WatchLink] asks for it).
  */
-class AskTileService : TileService() {
+class AskTileService : CallTileService() {
+
+    override val resourcesVersion = RESOURCES_VERSION
 
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> {
         val store = HeraldWatch.of(this).store
         val last = store.lastReply?.let(::spokenText)?.takeIf { it.isNotBlank() }
         val accent = store.accent.value
-        val tile = TileBuilders.Tile.Builder()
-            .setResourcesVersion(RESOURCES_VERSION)
-            .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout(last, accent?.fill ?: HERALD_BLUE, accent?.onFill ?: WHITE)))
-            .build()
-        return done(tile)
+        return done(tile(layout(last, accent?.fill ?: HERALD_BLUE, accent?.onFill ?: WHITE)))
     }
 
     override fun onTileResourcesRequest(requestParams: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =
-        done(
-            ResourceBuilders.Resources.Builder()
-                .setVersion(RESOURCES_VERSION)
-                .addIdToImageMapping(
-                    MIC,
-                    ResourceBuilders.ImageResource.Builder()
-                        .setAndroidResourceByResId(ResourceBuilders.AndroidImageResourceByResId.Builder().setResourceId(R.drawable.ic_call).build())
-                        .build(),
-                )
-                .build(),
-        )
+        done(resources(mapOf(MIC to R.drawable.ic_call)))
 
     /** [fill] is the accent the mic sits on (the phone's, once synced), [onFill] the mic's own color. */
     private fun layout(last: String?, fill: Int, onFill: Int): LayoutElementBuilders.LayoutElement {
@@ -128,10 +115,6 @@ class AskTileService : TileService() {
         .setModifiers(ModifiersBuilders.Modifiers.Builder().setPadding(ModifiersBuilders.Padding.Builder().setStart(dp(24f)).setEnd(dp(24f)).build()).build())
         .build()
 
-    private fun spacer(height: Float) = LayoutElementBuilders.Spacer.Builder().setHeight(dp(height)).build()
-
-    private fun <T : Any> done(value: T): ListenableFuture<T> = CallbackToFutureAdapter.getFuture { it.set(value) }
-
     private companion object {
         const val RESOURCES_VERSION = "2"
         const val MIC = "mic"
@@ -146,6 +129,3 @@ class AskTileService : TileService() {
         const val MUTED = 0xFF8A8A94.toInt()
     }
 }
-
-/** The soft ring round the tile's mic: [fill] at a quarter strength, as Herald blue's ring always was. */
-internal fun softRing(fill: Int): Int = (fill and 0x00FFFFFF) or 0x40000000

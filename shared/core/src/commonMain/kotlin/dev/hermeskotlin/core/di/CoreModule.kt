@@ -63,6 +63,7 @@ import dev.hermeskotlin.core.rooms.RoomLinks
 import dev.hermeskotlin.core.rooms.RoomSeenStore
 import dev.hermeskotlin.core.rooms.RoomsApi
 import dev.hermeskotlin.core.voice.AudioApi
+import dev.hermeskotlin.core.words.OwnerWordsApi
 import dev.hermeskotlin.core.voice.GatewaySpeechStreams
 import dev.hermeskotlin.core.voice.SpeechStreams
 import io.ktor.client.HttpClient
@@ -129,6 +130,7 @@ val coreModule = module {
     single { SlashApi(get()) }
     single { PetApi(get()) }
     single { BotsApi(get()) }
+    single { OwnerWordsApi(get()) }
     single { ProjectsApi(get()) }
     single { ThreadsApi(get()) }
     single {

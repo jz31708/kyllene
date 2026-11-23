@@ -145,8 +145,11 @@ class MainActivity : ComponentActivity() {
     private fun handle(intent: Intent) {
         // Debug builds take a typed question from adb (`--es ask "…"`), for trying a turn on an emulator without a mic.
         val typed = if (BuildConfig.DEBUG) intent.getStringExtra(EXTRA_DEBUG_ASK) else null
+        // A tile's canned ask: already a question, so no recognizer and no recording.
+        val asked = intent.getStringExtra(EXTRA_ASK)?.takeIf { it.isNotBlank() }
         when {
             !typed.isNullOrBlank() -> app.link.ask(typed)
+            asked != null -> app.link.ask(asked)
             intent.getBooleanExtra(EXTRA_CALL, false) -> defaultCall()
             intent.getStringExtra(EXTRA_ANSWER_CALL) == app.callToken -> call()
             AssistEntry.asksToListen(intent.action, intent.getBooleanExtra(EXTRA_LISTEN, false)) -> talk()
@@ -287,6 +290,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CALL = "call_default"
         const val EXTRA_LISTEN = "listen"
+
+        /** A tile's canned ask: the talk screen asks it as soon as it opens. */
+        const val EXTRA_ASK = "tile_ask"
         private const val EXTRA_ANSWER_CALL = "call"
         private const val EXTRA_DEBUG_ASK = "ask"
         private const val PHONE_CHECK_MS = 30_000L

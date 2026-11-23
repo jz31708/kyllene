@@ -1423,6 +1423,7 @@ private fun ColumnScope.Dock(
                 onEnd = actions::stopVoiceChat,
                 onExpand = onExpandVoice,
                 onSendNow = actions::sendVoiceNow,
+                onHeadsetMic = actions::toggleHeadsetMic,
             )
         }
     } else {

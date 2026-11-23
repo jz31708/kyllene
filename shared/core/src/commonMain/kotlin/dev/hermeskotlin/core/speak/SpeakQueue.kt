@@ -1,6 +1,12 @@
 package dev.hermeskotlin.core.speak
 
+import dev.hermeskotlin.core.network.HermesJson
 import dev.hermeskotlin.core.push.PushMessage
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * One utterance a seat asked this phone to say aloud, as it arrives on the push channel
@@ -66,6 +72,28 @@ data class SpeakItem(
                 expires = message.expires,
                 at = message.ts,
             )
+        }
+
+        /**
+         * A `speak` that arrived as a gateway event over `/api/ws` rather than as an ntfy push
+         * (`worktable-spec.md` §11.3): the event's `type` is the push type and its `payload` is the same
+         * plaintext, with `type` left out of the body.
+         */
+        fun fromEvent(type: String, payload: JsonElement?): SpeakItem? {
+            if (type != PushMessage.SPEAK) return null
+            val body = payload as? JsonObject ?: return null
+            // An id is what makes a redelivery a repeat; without one the item can't be deduped or acknowledged.
+            if ((body["id"] as? JsonPrimitive)?.isString != true) return null
+            val message = runCatching {
+                val fields = buildJsonObject {
+                    body.forEach { (key, value) -> if (key != "type") put(key, value) }
+                    put("type", PushMessage.SPEAK)
+                    // Events carry the server's `ts` on the envelope, not always in the payload.
+                    if (body["ts"] == null) put("ts", 0L)
+                }
+                HermesJson.decodeFromJsonElement(PushMessage.serializer(), fields)
+            }.getOrNull() ?: return null
+            return from(message)
         }
     }
 }

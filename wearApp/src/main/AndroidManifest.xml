@@ -112,6 +112,46 @@
                 android:resource="@drawable/tile_preview" />
         </service>
 
+        <!-- The Life and Board tiles: what the phone last published, and a way into the call or a quick note.
+             Each answers from WatchStore, never from the phone, so the system doesn't wait on a connection. -->
+        <service
+            android:name=".LifeTileService"
+            android:description="@string/life_tile_description"
+            android:exported="true"
+            android:icon="@drawable/ic_call"
+            android:label="@string/life_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview" />
+        </service>
+
+        <service
+            android:name=".BoardTileService"
+            android:description="@string/board_tile_description"
+            android:exported="true"
+            android:icon="@drawable/ic_call"
+            android:label="@string/board_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview" />
+        </service>
+
+        <!-- The Board's quick note, behind the Board tile's Note chip: dictated words, and the phone's mic toggle. -->
+        <activity
+            android:name=".NoteActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="" />
+
         <service
             android:name=".AskComplicationService"
             android:exported="true"

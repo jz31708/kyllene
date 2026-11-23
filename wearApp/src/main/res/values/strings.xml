@@ -102,6 +102,37 @@
     <string name="wear_ago_days">%1$dd</string>
     <string name="wear_ago_weeks">%1$dw</string>
 
+    <!-- The Life and Board tiles -->
+    <string name="life_tile_label">Life</string>
+    <string name="life_tile_description">What the Life call is doing.</string>
+    <string name="board_tile_label">Board</string>
+    <string name="board_tile_description">Who holds the Board’s floor, and a quick note.</string>
+    <string name="wear_life_tile_default">Life</string>
+    <string name="wear_board_tile_default">Board</string>
+    <string name="wear_tile_waiting">Waiting for your phone</string>
+    <string name="wear_tile_ask">Ask</string>
+    <!-- A state word, as the phone reports it -->
+    <string name="wear_state_idle">Idle</string>
+    <string name="wear_state_listening">Listening</string>
+    <string name="wear_state_live">Live</string>
+    <string name="wear_state_muted">Muted</string>
+    <!-- Canned asks on a tile: short, and already sent when the talk screen opens -->
+    <string name="wear_ask_status">What’s the status?</string>
+    <string name="wear_ask_next">What’s next?</string>
+    <string name="wear_board_floor">Floor: %1$s</string>
+    <string name="wear_board_notes_waiting">%1$d notes waiting</string>
+
+    <!-- The Board's quick note -->
+    <string name="wear_note">Note</string>
+    <string name="wear_note_hint">Tap to dictate</string>
+    <string name="wear_note_saving">Saving…</string>
+    <string name="wear_note_saved">Saved</string>
+    <string name="wear_mic">Mic</string>
+    <string name="wear_mic_toggle_hint">Toggle the phone’s mic</string>
+    <string name="wear_mic_toggled">Phone mic toggled</string>
+    <string name="wear_note_failed">The note wasn’t saved.</string>
+    <string name="wear_note_no_speech">This watch has no speech input for notes.</string>
+
     <!-- Settings -->
     <string name="wear_talk_live">Talk live</string>
     <string name="wear_talk_live_detail">As a voice call</string>

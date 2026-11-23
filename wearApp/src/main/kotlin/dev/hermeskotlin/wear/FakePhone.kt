@@ -1,6 +1,13 @@
 package dev.hermeskotlin.wear
 
+import dev.hermeskotlin.wearlink.BoardState
+import dev.hermeskotlin.wearlink.CallTile
 import dev.hermeskotlin.wearlink.ChatListRequest
+import dev.hermeskotlin.wearlink.NoteSaved
+import dev.hermeskotlin.wearlink.QuickNote
+import dev.hermeskotlin.wearlink.Seat
+import dev.hermeskotlin.wearlink.SeatSpeech
+import dev.hermeskotlin.wearlink.TilesState
 import dev.hermeskotlin.wearlink.WatchScope
 import dev.hermeskotlin.wearlink.ChatList
 import dev.hermeskotlin.wearlink.PhoneStatus
@@ -27,6 +34,8 @@ import kotlinx.coroutines.launch
 class FakePhone(private val scope: CoroutineScope, private val deliver: (String, ByteArray) -> Unit) {
 
     private var turn: Job? = null
+    private var revision = 0L
+    private var notes = 0
 
     fun receive(path: String, data: ByteArray) {
         when {
@@ -39,8 +48,39 @@ class FakePhone(private val scope: CoroutineScope, private val deliver: (String,
                 deliver(WearPaths.STATUS, WearJson.encode(PhoneStatus(signedIn = true, connected = true, botChats = true,
                     botProfile = request?.botProfile, requestId = request?.requestId, profileSync = true,
                     activeScope = SAMPLE_SCOPE, scope = request?.scope ?: SAMPLE_SCOPE)))
+                // As Herald's phone does: the status answer is also the clock anchor for the speech cue.
+                publishTiles()
             }
+            // The tiles ask: the same state, and a line about to be said, so the cue can be tried on an emulator.
+            path == WearPaths.TILES -> {
+                publishTiles()
+                scope.launch {
+                    delay(600)
+                    deliver(WearPaths.BOARD_SPEECH, WearJson.encode(SeatSpeech(TURN, SAMPLE_SEAT, 1, SAMPLE_LINE,
+                        onsetEpochMs = System.currentTimeMillis() + CUE_AHEAD_MS, playingOnWatch = false)))
+                }
+            }
+            path == WearPaths.BOARD_NOTES -> WearJson.decode<QuickNote>(data)?.let(::saved)
         }
+    }
+
+    /** A note: kept when it has words; a blank one is the mic toggle, as on the phone. Answered as one either way. */
+    private fun saved(note: QuickNote) {
+        if (note.text.isNotBlank()) notes++
+        deliver(WearPaths.BOARD_NOTE_SAVED, WearJson.encode(NoteSaved(note.id, saved = true, pendingNotes = notes)))
+        publishTiles()
+    }
+
+    private fun publishTiles() {
+        deliver(WearPaths.BOARD, WearJson.encode(BoardState(++revision, SAMPLE_BOARD, SAMPLE_SEATS, floor = SAMPLE_SEAT, pendingNotes = notes)))
+        deliver(WearPaths.TILES, WearJson.encode(TilesState(
+            revision = ++revision,
+            tiles = listOf(
+                CallTile("life", "life", "Life", if (notes > 0) "muted" else "listening", SAMPLE_LINE),
+                CallTile("board", "board", "Board", "live", if (notes > 0) "$notes saved" else "Ada holds the floor"),
+            ),
+            sentEpochMs = System.currentTimeMillis(),
+        )))
     }
 
     private fun answer(ask: WatchAsk, heard: String?) {
@@ -69,6 +109,12 @@ class FakePhone(private val scope: CoroutineScope, private val deliver: (String,
 
     private companion object {
         val SAMPLE_SCOPE = WatchScope("https://sample.example")
+        const val SAMPLE_BOARD = "sample-board"
+        const val SAMPLE_SEAT = "ada"
+        const val TURN = "sample-turn"
+        const val CUE_AHEAD_MS = 900L
+        val SAMPLE_SEATS = listOf(Seat("ada", "Ada", 0xFFF5A524), Seat("sam", "Sam", 0xFF2F6BF5))
+        const val SAMPLE_LINE = "Saturday looks sunny with a high of 22°C."
         const val SAMPLE_HEARD = "What's the weather like this weekend?"
         const val SAMPLE_REPLY = "Saturday looks sunny with a high of 22°C, so it's a good day to be outside. " +
             "Sunday turns cloudy in the afternoon, with a chance of light rain after 4 pm. " +

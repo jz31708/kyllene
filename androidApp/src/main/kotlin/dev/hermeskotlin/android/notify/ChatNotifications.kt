@@ -34,6 +34,7 @@ import dev.hermeskotlin.core.connection.ConnectionState
 import dev.hermeskotlin.core.inbox.InboxNotice
 import dev.hermeskotlin.core.inbox.InboxNotices
 import dev.hermeskotlin.core.phone.AgentCall
+import dev.hermeskotlin.core.speak.SpeakItem
 import dev.hermeskotlin.core.phone.CallOpeners
 import dev.hermeskotlin.core.phone.CallOutcome
 import dev.hermeskotlin.core.phone.CallReason
@@ -839,6 +840,34 @@ class ChatNotifications(
             .build(),
     )
 
+    /**
+     * A line a seat pushed while no call was open (`docs/board/server-push.md` §6): a notification, never
+     * surprise audio. Tapping opens the seat's chat, where the line also waits in its thread.
+     */
+    fun postPushedSpeech(item: SpeakItem) {
+        val title = item.label?.trim()?.takeIf { it.isNotEmpty() } ?: item.seat?.trim()?.takeIf { it.isNotEmpty() } ?: str(R.string.app_name)
+        val text = item.text.toPlainText().take(MAX_PREVIEW).ifBlank { return }
+        val intent = appIntent()
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        item.seat?.let { intent.putExtra(EXTRA_OPEN_BOT, it) }
+        item.session?.let { intent.putExtra(EXTRA_OPEN_SESSION, it) }
+        val open = PendingIntent.getActivity(context, "speak:${item.id}".hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        post(
+            TAG_PUSHED,
+            PUSHED_ID + (item.id.hashCode() and 0xFFFF),
+            NotificationCompat.Builder(context, CHANNEL_BOTS)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(ContextCompat.getColor(context, R.color.notification_accent))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .build(),
+        )
+    }
+
     private fun openBot(bot: Bot, storedSessionId: String): PendingIntent {
         val intent = appIntent()
             .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -921,6 +950,10 @@ class ChatNotifications(
         const val EXTRA_INBOX_GATEWAY = "inbox_gateway"
         const val CALL_ID = 9
         const val READ_ALOUD_ID = 10
+
+        /** A seat's pushed line while no call is open; one notification per line, under [TAG_PUSHED]. */
+        const val PUSHED_ID = 11
+        const val TAG_PUSHED = "pushed_speech"
 
         /** On an Answer's launch intent: the request whose call was answered. */
         const val EXTRA_ANSWERED_CALL = "answered_call"

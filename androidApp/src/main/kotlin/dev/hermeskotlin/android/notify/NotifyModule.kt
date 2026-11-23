@@ -14,6 +14,8 @@ import dev.hermeskotlin.core.phone.quietNow
 import dev.hermeskotlin.core.settings.SettingsStore
 import java.time.LocalTime
 import dev.hermeskotlin.android.push.PushStore
+import dev.hermeskotlin.android.push.PushedSpeech
+import dev.hermeskotlin.android.words.OwnerWordOutbox
 import dev.hermeskotlin.core.inbox.InboxApi
 import dev.hermeskotlin.core.inbox.InboxNotices
 import dev.hermeskotlin.core.push.PushKeys
@@ -51,7 +53,9 @@ val notifyModule = module {
     single { RoomNotifier(get(), get(), get(), get(), get(), get()) }
     single { PushStore(androidContext()) } bind PushKeys::class
     single { InboxApi(get(), get()) }
-    single { PushListener(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { PushedSpeech(get(), get()) }
+    single { OwnerWordOutbox(androidContext(), get(), get(), get(), get()) }
+    single { PushListener(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { PushSetup(get(), get(), get(), get(), get(), get(), deviceName = { Build.MODEL ?: "Android phone" }) }
     single { PhoneConfirmations(androidContext()) }
     single { Geofences(androidContext(), get(), get()) } bind WatchedPlaces::class

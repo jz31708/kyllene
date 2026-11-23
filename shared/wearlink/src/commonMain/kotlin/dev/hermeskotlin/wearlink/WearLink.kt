@@ -69,6 +69,27 @@ object WearPaths {
      */
     const val RING_ON = "/herald/ring/on"
 
+    /**
+     * Phone → watch: a [TilesState] for the Life and Board tiles, again whenever it changes; watch → phone: a
+     * [TilesRequest], answered with one straight away (the round trip also anchors the two clocks).
+     */
+    const val TILES = "/herald/tiles"
+
+    /** Phone → watch: a [BoardState], the seats and who holds the floor. */
+    const val BOARD = "/herald/board"
+
+    /** Phone → watch: a [SeatSpeech], one spoken line with its predicted audible onset. */
+    const val BOARD_SPEECH = "/herald/board/speech"
+
+    /** Watch → phone: a [QuickNote]; a blank text asks the phone to toggle its mic instead. */
+    const val BOARD_NOTES = "/herald/board/notes"
+
+    /** Phone → watch: a [NoteSaved], the phone's answer to a [QuickNote]. */
+    const val BOARD_NOTE_SAVED = "/herald/board/note/saved"
+
+    /** Watch → phone: a [HapticFired], evidence of the 300 ms cue; it asks for nothing. */
+    const val BOARD_HAPTIC = "/herald/board/haptic"
+
     /** Every path above and below starts with this; the apps' listeners filter on it. */
     const val PREFIX = "/herald/"
 
@@ -294,6 +315,87 @@ data class PhoneStatus(
     val scope: WatchScope? = null,
     val accent: WatchAccent? = null,
 )
+
+/*
+ * The Board on the wrist: the phone publishes what its tiles show, the watch renders it and sends back a note
+ * taken there. The watch derives nothing from captions and never opens its microphone for a Board call.
+ */
+
+/**
+ * What the Life and Board tiles show, as the phone last published it. [revision] only grows; a watch keeps the
+ * newest and ignores the rest. [error] is a line the tiles can show when the phone can't read its own state.
+ * [sentEpochMs] is the phone's clock when this went out, which anchors the watch's clock for the speech cue.
+ */
+@Serializable
+data class TilesState(
+    val revision: Long,
+    val tiles: List<CallTile> = emptyList(),
+    val error: String? = null,
+    val sentEpochMs: Long? = null,
+) {
+    fun tile(kind: String): CallTile? = tiles.firstOrNull { it.kind == kind }
+}
+
+/** Watch → phone: ask for a [TilesState] now. [sentEpochMs] is the watch's clock, for the round trip's anchor. */
+@Serializable
+data class TilesRequest(val requestId: String, val sentEpochMs: Long)
+
+/** One tile's content: a title, one state word, and one line of detail. [kind] is "life" or "board". */
+@Serializable
+data class CallTile(
+    val id: String = "",
+    val kind: String,
+    val title: String,
+    /** idle | listening | live | muted. */
+    val state: String,
+    val detail: String? = null,
+)
+
+/** The Board's room as the phone sees it: [seats] in the registry, [floor] the seat holding it, notes waiting. */
+@Serializable
+data class BoardState(
+    val revision: Long,
+    val boardId: String,
+    val seats: List<Seat> = emptyList(),
+    val floor: String? = null,
+    val pendingNotes: Int = 0,
+)
+
+/** A seat round the Board; [color] is its ARGB colour from the phone's registry. */
+@Serializable
+data class Seat(val id: String, val label: String, val color: Long? = null)
+
+/**
+ * One line a seat says, sent as soon as it's queued. [onsetEpochMs] is the predicted audible onset in the phone's
+ * clock (corrected once playback really starts), [playingOnWatch] whether the watch's own speaker will say it.
+ */
+@Serializable
+data class SeatSpeech(
+    val turnId: String,
+    val seatId: String,
+    val seq: Int = 0,
+    val text: String = "",
+    val onsetEpochMs: Long? = null,
+    val playingOnWatch: Boolean = false,
+)
+
+/**
+ * A note taken on the wrist: [text] typed or dictated there. A blank [text] has no words of its own: it asks the
+ * phone to toggle its microphone, since the watch never opens one for the Board.
+ */
+@Serializable
+data class QuickNote(val id: String, val text: String = "", val boardId: String? = null, val seatId: String? = null)
+
+/** The phone's answer to a [QuickNote]: saved, or not ([error]), with how many notes wait there now. */
+@Serializable
+data class NoteSaved(val noteId: String, val saved: Boolean, val pendingNotes: Int = 0, val error: String? = null)
+
+/**
+ * Evidence that the watch's cue went off, never permission for speech to start: [firedEpochMs] is on the phone's
+ * clock and [leadMs] the lead it had against the predicted onset, so the phone can tune the next one.
+ */
+@Serializable
+data class HapticFired(val turnId: String, val seatId: String, val firedEpochMs: Long, val leadMs: Long)
 
 /*
  * A live voice call from the watch. The watch holds the WebRTC call itself (its microphone and speaker, straight

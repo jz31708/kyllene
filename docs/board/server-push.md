@@ -4,8 +4,10 @@ A seat on the Board speaks when it has something to say — a deferred answer, a
 when the owner talks to it. This note is the phone's end of that: what Kyllene already receives, the one message
 type this fork adds, and the rules the phone follows before it makes a sound.
 
-Status: client types and the queue are in this fork (`shared/core/.../speak/`, `PushMessage.speak`). The gateway
-side is owned elsewhere; §5 is the contract it has to meet.
+Status (2026-11-23): the phone's side is built. `PushedSpeech` (`androidApp/.../push/`) takes `speak` from **either**
+channel — the herald-push envelope or a `/api/ws` event — through the one `SpeakQueue`; the open chained call says it
+via `PushedSpeechTarget.sayPushed`, and the phone reports `speak_ack`. With no call it is a notification
+(`ChatNotifications.postPushedSpeech`). The gateway side is owned elsewhere; §5 is the contract it has to meet.
 
 ## 1. What already exists
 
@@ -91,6 +93,24 @@ A new gateway → phone type in the same envelope, same crypto, same `id`/`ts` r
 The phone also needs a cue: about 300 ms before audible speech, a short soft tone in the earpiece/speaker and a
 haptic on the watch, scheduled against measured audible onset rather than against the request. That is the watch
 companion's job (`docs/board/watch-plan.md`).
+
+## 3b. The `/api/ws` shape this phone accepts
+
+During a call the gateway pushes the same plaintext as an ordinary JSON-RPC event on the dashboard socket:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"speak","payload":{
+  "id":"<uuid>","ts":1790000000,"bot":"board","label":"Board","session":"<stored id>",
+  "text":"...","priority":"when_ready","call":"<call id>","rev":42,"expires_on_rev":42
+}}}
+```
+
+`SpeakItem.fromEvent` fills in the type the payload leaves out. A correction arrives as
+`{"type":"intent.revision","payload":{"rev":43}}`; queued items bound below 43 are retired and acknowledged
+`expired`.
+
+The ack goes back as a **JSON-RPC notification** (no id, no reply): method `speak_ack`, params the §4 object.
+An ack that cannot be sent is dropped; it never delays or fails a call.
 
 ## 4. Acknowledgements
 

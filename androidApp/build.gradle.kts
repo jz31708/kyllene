@@ -115,6 +115,16 @@ android {
             applicationIdSuffix = ".board"
             versionNameSuffix = "-board"
         }
+        // "Kyllene Board (release)": the Board's installable build — R8, not debuggable — that still installs
+        // beside Thomas's released Kyllene because of the suffix. Signed with the debug key unless a release
+        // keystore is present, so each Board build installs over the last.
+        create("board") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".board"
+            versionNameSuffix = "-board"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
 }
 

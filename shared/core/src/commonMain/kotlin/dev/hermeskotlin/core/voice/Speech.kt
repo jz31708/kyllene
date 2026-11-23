@@ -168,6 +168,12 @@ interface SpeechPlayer {
     /** Plays the local connection cue once; cancelling stops it. Unsupported devices stay silent. */
     suspend fun playRingback() = Unit
 
+    /**
+     * Uses a Bluetooth headset's own microphone and route (HFP) instead of the phone's mic with A2DP playback.
+     * An explicit mode for wind or a bike; a player that can't says so by doing nothing.
+     */
+    fun headsetMic(on: Boolean) = Unit
+
     /** Plays [audio] to the end; cancelling stops it. */
     suspend fun play(audio: SpokenAudio)
 
@@ -195,6 +201,18 @@ interface SpeechPlayer {
             onSound(false)
         }
     }
+}
+
+/**
+ * A player that knows whether the app may take the speaker now. Navigation, a phone call or another
+ * assistant holding audio focus makes pushed speech wait rather than talk over them (`§11.3`).
+ */
+interface AudioFocusAware {
+    /** True when nothing else holds audio focus; a player that never checks is always free. */
+    val audioFree: Boolean get() = true
+
+    /** The output in use now ("phone speaker", the headset's own name), for the call screen and the watch. */
+    val audioRoute: String? get() = null
 }
 
 /** [pcm] (16-bit, [channels] interleaved) as a WAV file. */

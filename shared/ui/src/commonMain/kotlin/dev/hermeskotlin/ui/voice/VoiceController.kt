@@ -13,7 +13,14 @@ import dev.hermeskotlin.core.phone.CallReason
 import dev.hermeskotlin.core.phone.liveOpener
 import dev.hermeskotlin.core.phone.spokenOpener
 import dev.hermeskotlin.core.settings.DictationEngine
+import dev.hermeskotlin.core.speak.BoardCallBus
+import dev.hermeskotlin.core.speak.BoardCallSnapshot
+import dev.hermeskotlin.core.speak.PushedSpeechTarget
+import dev.hermeskotlin.core.speak.PushedSpeechTargets
+import dev.hermeskotlin.core.speak.SpeakItem
+import dev.hermeskotlin.core.speak.SpeakOutcome
 import dev.hermeskotlin.core.voice.AudioApi
+import dev.hermeskotlin.core.voice.AudioFocusAware
 import dev.hermeskotlin.core.voice.BargeIn
 import dev.hermeskotlin.core.voice.BargeInSettings
 import dev.hermeskotlin.core.voice.DeviceDictation
@@ -62,6 +69,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -91,6 +99,10 @@ data class VoiceChatState(
     val live: Boolean = false,
     /** The microphone is off in a live call. */
     val muted: Boolean = false,
+    /** A Bluetooth headset's own microphone and route are in use, rather than the phone's mic with A2DP. */
+    val headsetMic: Boolean = false,
+    /** The output the line is on now ("phone speaker", "Shokz OpenRun Pro 2"), as the player names it. */
+    val route: String? = null,
     /** The latest words said, as captions: yours, or the voice's when [captionIsVoice]. */
     val caption: String? = null,
     val captionIsVoice: Boolean = false,
@@ -150,7 +162,7 @@ class VoiceController(
     /** Holds Read aloud up while Herald is out of sight; without it, leaving the app stops the reading. */
     private val readAloudKeepAlive: ReadAloudKeepAlive? = null,
     private val liveCalls: LiveCalls? = null,
-) {
+) : PushedSpeechTarget {
     private val _chat = MutableStateFlow(VoiceChatState())
     val chat: StateFlow<VoiceChatState> = _chat.asStateFlow()
 
@@ -172,9 +184,23 @@ class VoiceController(
             cancelDictation()
             stopReading()
         }
-        scope.coroutineContext[Job]?.invokeOnCompletion { quiet() }
+        scope.coroutineContext[Job]?.invokeOnCompletion {
+            quiet()
+            BoardCallBus.publish(BoardCallSnapshot())
+        }
+        // The watch shows what the call is doing; it never derives it from captions.
+        scope.launch { _chat.collect { publishBoard() } }
     }
     private var speechJob: Job? = null
+    /** Where the open chained call sends a pushed line, and in whose voice (set while [chained] is). */
+    private var callGateway: GatewayUrl? = null
+    private var callProfile: String? = null
+    /** The pushed line being said, for the watch's floor holder; null between lines. */
+    private var pushedLabel: String? = null
+    /** The watch's cue is announced before playback: the seat, its predicted onset, and a sequence. */
+    private var speechSeat: String? = null
+    private var speechOnsetEpochMs: Long? = null
+    private var speechSeq: Int = 0
     /** The gateway whose speech socket couldn't open in this chat; its replies are read out once they're done. */
     private var noSpeechStream: GatewayUrl? = null
     /** What of this turn's reply went to the speech socket, as it was written. */
@@ -340,6 +366,10 @@ class VoiceController(
         cantListenOver = false
         val running = coroutineContext.job
         chained = running
+        // The app's speak queue can put a seat's deferred line into this call while it is open.
+        callGateway = gateway
+        callProfile = profile
+        PushedSpeechTargets.register(this@VoiceController)
         // Not a live call after all: it's this chat, and Mute is offered from here.
         _chat.update { if (it.phase == VoicePhase.Connecting) it.copy(phase = VoicePhase.Listening) else it }
         var failures = 0
@@ -373,6 +403,11 @@ class VoiceController(
             bargeIn = null
             // A newer chat may have started while this one wound down; it keeps its own.
             if (chained === running) chained = null
+            if (chained === null) {
+                callGateway = null
+                callProfile = null
+                PushedSpeechTargets.release(this@VoiceController)
+            }
             appScope.launch { audio.ttsLease(gateway, active = false, profile) }
             if (chainedAudio === closeAudio) chainedAudio = null
             closeAudio()
@@ -421,6 +456,14 @@ class VoiceController(
             if (chatJob == null || chatJob === mine) _chat.value = VoiceChatState(error = error.takeUnless { stoppedByUser })
         }
         return true
+    }
+
+    /** Moves the call to the headset's microphone (HFP), or back to the phone's mic with A2DP playback. */
+    fun toggleHeadsetMic() {
+        if (chained == null && live == null) return
+        val on = !_chat.value.headsetMic
+        player.headsetMic(on)
+        _chat.update { it.copy(headsetMic = on) }
     }
 
     /** Turns the microphone off or on in a live call, or in a chained voice chat. */
@@ -816,7 +859,11 @@ class VoiceController(
             if (_chat.value.muted) continue
             // From here, an error on show is this turn's own.
             _chat.update { it.copy(error = null) }
-            return if (transcript.isBlank()) Heard.Silence else Heard.Words(transcript)
+            if (transcript.isBlank()) return Heard.Silence
+            // The app's own voice, heard back as the call listens: a reply's, or a seat's pushed line. The same
+            // test the barge-in listen makes, so a pushed line can never become the owner's next prompt.
+            if (withContext(Dispatchers.Default) { isTtsEcho(transcript, voiced) }) return Heard.Silence
+            return Heard.Words(transcript)
         }
     }
 
@@ -1077,6 +1124,110 @@ class VoiceController(
         speechJob = null
     }
 
+    // PushedSpeechTarget: the floor as this call sees it, for a seat's deferred line (`/api/ws` speak).
+
+    override val callActive: Boolean get() = chained != null
+
+    override val personSpeaking: Boolean get() = _chat.value.hearing
+
+    override val audioFree: Boolean get() = (player as? AudioFocusAware)?.audioFree ?: true
+
+    override val busy: Boolean
+        get() = playing.value || readingJob?.isActive == true ||
+            (_chat.value.phase != VoicePhase.Listening && _chat.value.phase != VoicePhase.Off)
+
+    /** Kyllene has no call id of its own yet; a line bound to a call waits for the gateway to name one. */
+    override val callId: String? get() = null
+
+    /** The watch's mic button: it toggles this call's microphone, on the phone. */
+    override fun toggleMic() = toggleMute()
+
+    /**
+     * Says a line a seat pushed while this chained call is open, verbatim, in the call's voice. It is the
+     * same path a reply takes (gateway TTS, the same player), and it is [speechJob], so barge-in, Skip and
+     * hanging up stop it exactly as they stop a reply. [onHeard] gets the running character count.
+     */
+    override suspend fun sayPushed(item: SpeakItem, onHeard: (Int) -> Unit): SpeakOutcome {
+        val gateway = callGateway ?: return SpeakOutcome.Skipped
+        val profile = callProfile
+        val outcome = CompletableDeferred<SpeakOutcome>()
+        var heard = 0
+        var failed = false
+        // A child of the call: hanging up cancels the line with the conversation, never after it.
+        val job = scope.launch(chained ?: kotlin.coroutines.EmptyCoroutineContext, start = CoroutineStart.LAZY) {
+            try {
+                voiced = item.text
+                voice(
+                    item.text,
+                    gateway,
+                    profile,
+                    onChunkPlayed = { chunk ->
+                        heard = (heard + chunk.length).coerceAtMost(item.text.length)
+                        onHeard(heard)
+                    },
+                    onError = { failed = true },
+                )
+                outcome.complete(if (failed) SpeakOutcome.Stopped else SpeakOutcome.Played)
+            } catch (e: CancellationException) {
+                outcome.complete(SpeakOutcome.Stopped)
+                throw e
+            } catch (_: Exception) {
+                outcome.complete(SpeakOutcome.Stopped)
+            }
+        }
+        speechJob = job
+        pushedLabel = item.label?.takeIf { it.isNotBlank() } ?: item.seat
+        // The wrist needs a moment's notice: predict the audible onset, then correct it if playback starts later.
+        speechSeat = item.seat
+        speechOnsetEpochMs = System.currentTimeMillis() + SPEECH_CUE_LEAD_MS
+        speechSeq += 1
+        publishBoard()
+        job.invokeOnCompletion { if (speechJob === job) speechJob = null }
+        // Barge-in: a finalized utterance from the owner stops the line, and never becomes a command it caused.
+        val barge = scope.launch {
+            _chat.first { it.hearing }
+            job.cancel()
+        }
+        job.invokeOnCompletion { barge.cancel() }
+        job.start()
+        return try {
+            outcome.await()
+        } finally {
+            pushedLabel = null
+            speechSeat = null
+            speechOnsetEpochMs = null
+            publishBoard()
+        }
+    }
+
+    /** Publishes the call's state for the watch: tiles, the floor, and the listening state. */
+    private fun publishBoard() {
+        val s = _chat.value
+        val route = (player as? AudioFocusAware)?.audioRoute
+        if (s.route != route) {
+            // The player names the output; the panel shows it beside the headset toggle.
+            _chat.update { it.copy(route = route) }
+            return
+        }
+        val speaking = playing.value || s.phase == VoicePhase.Speaking
+        BoardCallBus.publish(
+            BoardCallSnapshot(
+                active = chained != null,
+                live = s.live,
+                muted = s.muted,
+                listening = s.phase == VoicePhase.Listening,
+                hearing = s.hearing,
+                speaking = speaking,
+                floor = if (speaking) (pushedLabel ?: callProfile ?: "board") else null,
+                floorLabel = if (speaking) (pushedLabel ?: callProfile ?: "Board") else null,
+                route = route,
+                speechSeat = speechSeat,
+                speechOnsetEpochMs = speechOnsetEpochMs,
+                speechSeq = speechSeq,
+            ),
+        )
+    }
+
     /**
      * Reads [text] aloud piece by piece, synthesizing the next piece while the current one plays. [onError] hears
      * what went wrong: a piece the gateway couldn't voice ends it, one the player couldn't play is passed over.
@@ -1088,9 +1239,11 @@ class VoiceController(
         gateway: GatewayUrl,
         profile: String?,
         keptAs: String? = null,
+        /** Each piece once it has actually played, so a caller can track what was heard. */
+        onChunkPlayed: (String) -> Unit = {},
         onError: (String) -> Unit,
     ) = coroutineScope {
-        val clips = Channel<SpokenAudio>(capacity = 1)
+        val clips = Channel<Pair<SpokenAudio, String>>(capacity = 1)
         launch {
             for (chunk in speechChunks(text)) {
                 val clip = keptAs?.let { readAloudVoices.piece(it, chunk) } ?: when (val result = audio.speak(gateway, chunk, profile)) {
@@ -1100,14 +1253,15 @@ class VoiceController(
                         break
                     }
                 }
-                clips.send(clip)
+                clips.send(clip to chunk)
             }
             clips.close()
         }
-        for (clip in clips) {
+        for ((clip, chunk) in clips) {
             try {
                 playing.value = true
                 player.play(clip)
+                onChunkPlayed(chunk)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1347,6 +1501,9 @@ private object Readings {
  * the speaker's call routing and the call service are one for all. Each is kept by its job, so one ending doesn't
  * speak for another. All on the main thread, as the voice chat is.
  */
+/** How much notice the wrist gets before a pushed line is audible; the TTS first byte dominates. */
+private const val SPEECH_CUE_LEAD_MS = 1_400L
+
 internal object VoiceChats {
     private class Chat(val job: Job, val owner: Any, val stop: () -> Unit)
 

@@ -52,6 +52,7 @@ class PushListener(
     private val gateways: GatewayRepository,
     private val phoneTools: PhoneToolsBridge,
     private val inbox: InboxStore,
+    private val pushed: PushedSpeech,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val guard = PushGuard(PushMessage.MAX_AGE_G2P_SECONDS) { System.currentTimeMillis() / 1000 }
@@ -103,6 +104,8 @@ class PushListener(
             // backlog read after a restart) is past its time and doesn't ring.
             PushMessage.PHONE_CALL -> phoneTools.ring(message)
             PushMessage.CRON_RUN -> showCronRun(message, gatewayUrl ?: return)
+            // A seat's deferred line: the call says it while one is open, otherwise it becomes a notification.
+            PushMessage.SPEAK -> pushed.offer(message)
         }
     }
 

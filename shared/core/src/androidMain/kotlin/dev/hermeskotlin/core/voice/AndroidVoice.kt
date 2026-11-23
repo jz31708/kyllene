@@ -22,6 +22,9 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -270,7 +273,7 @@ class AndroidSpeechPlayer(
     private val context: Context,
     /** Tells the recorder whether this player holds call routing for a chained chat. */
     route: ChatAudioRoute = ChatAudioRoute(),
-) : SpeechPlayer {
+) : SpeechPlayer, AudioFocusAware {
     override suspend fun playRingback() {
         val bytes = withContext(Dispatchers.IO) { context.assets.open("call_ringback.wav").use { it.readBytes() } }
         play(SpokenAudio(bytes, "audio/wav"))
@@ -280,16 +283,41 @@ class AndroidSpeechPlayer(
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     /** Each chained chat open. The chat, a phone call and the assistant panel share this player. */
     private val chatAudioOwners = mutableSetOf<Any>()
-    /** Puts the usual route back; set while the chained chats have call routing. */
+    /** Puts the usual route back; set while the chained chats hold call routing or the headset's microphone. */
     private var restoreChatAudio: (() -> Unit)? = null
+    /** The route held is the Bluetooth headset's rather than call routing on the phone's speaker. */
+    private var headsetRouting = false
+    /** The headset's microphone was asked for with [headsetMic], across chats until it's turned off. */
+    private var headsetMicOn = false
+    /** Whether the outputs are watched: while a chat is open, or the headset's microphone is wanted. */
+    private var watchingOutputs = false
+    /** Speeches playing now: the first takes the speaker and the last lets it go. */
+    private var speechCount = 0
+    /** The speaker isn't the app's, or a phone call has it: what plays is paused until it comes back. */
+    private var focusHeld = false
+    /** Where replies are heard, named for whoever shows the line's route. */
+    private val _routeLabel = MutableStateFlow<String?>(null)
+    /** The output in use now: the device's own name where it has one, else what kind of device it is. */
+    val routeLabel: StateFlow<String?> = _routeLabel.asStateFlow()
+
+    /** Whether the app may take the speaker now: a pushed line waits while navigation or a call has it. */
+    override val audioFree: Boolean get() = synchronized(lock) { !focusHeld }
+
+    /** The output in use now, for the call screen and the watch (`BoardCallSnapshot.route`). */
+    override val audioRoute: String? get() = _routeLabel.value
+    /** The speaker, for as long as one speech plays: taken when it starts and let go when it ends. */
+    private val callFocus = CallAudioFocus(context) { free -> focusChanged(free) }
     /** Headphones or earbuds that come or go during a chained chat change its route. */
     private val outputsChanged = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = reroute()
+        // One that appears mid-word waits for the next speech, which takes it up: swapping a working route under the
+        // line would be heard. One that goes takes its route with it, so the speaker is put back at once.
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = reroute(onlyWhenIdle = true)
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = reroute()
     }
 
     init {
         route.check = { callRoutingHeld() }
+        publishRoute()
     }
 
     /**
@@ -304,6 +332,8 @@ class AndroidSpeechPlayer(
     /** Held ([hold]): what plays now is paused, and what's ready meanwhile waits to start. */
     private var holding = false
     private var track: AudioTrack? = null
+    /** Whether the track built now has been let start; a stopped one that has played isn't started over. */
+    private var trackPlayed = false
     /** A clip once it's ready to play. */
     private var clip: MediaPlayer? = null
 
@@ -316,69 +346,211 @@ class AndroidSpeechPlayer(
      */
     override fun chainedChatAudio(): () -> Unit = synchronized(lock) {
         val owner = Any()
-        if (chatAudioOwners.isEmpty()) runCatching { audioManager.registerAudioDeviceCallback(outputsChanged, null) }
         chatAudioOwners += owner
+        watchOutputs(true)
         reroute()
         return@synchronized {
             synchronized(lock) {
                 // An old chat's finally must not restore under a newer one, here or in another controller.
                 if (chatAudioOwners.remove(owner) && chatAudioOwners.isEmpty()) {
-                    runCatching { audioManager.unregisterAudioDeviceCallback(outputsChanged) }
+                    watchOutputs(headsetMicOn)
                     reroute()
                 }
             }
         }
     }
 
-    /** Call routing while a chained chat is open on the phone's own speaker, the usual route otherwise. */
-    @Suppress("DEPRECATION")
-    private fun reroute(): Unit = synchronized(lock) {
-        val outputs = runCatching { audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS) }.getOrNull()
-        val wanted = chatAudioOwners.isNotEmpty() && outputs != null && outputs.none { it.type in OWN_OUTPUTS }
-        val held = restoreChatAudio
-        if (wanted && held != null) {
-            // The system puts the mode back to normal once no call audio has played or listened for a few seconds,
-            // as between a reply and the next turn (#408). Held routing is taken up again from there, or let go if it
-            // won't take; a mode someone else holds, such as a phone call ringing or in progress, is left alone.
-            if (audioManager.mode != AudioManager.MODE_NORMAL) return
-            if (!runCatching { callRouting() }.getOrDefault(false)) {
-                held()
-                restoreChatAudio = null
+    /**
+     * Records from a Bluetooth headset's microphone, as a call does, while one is connected: the reply and the turn
+     * between replies both go over it, at call quality. Turned off, or with the headset gone, the phone's speaker has
+     * the line again. Kept across chats until it's turned off.
+     */
+    override fun headsetMic(on: Boolean) = synchronized(lock) {
+        headsetMicOn = on
+        watchOutputs(on || chatAudioOwners.isNotEmpty())
+        reroute()
+    }
+
+    /** Watches the outputs while one of them can change the route; called with [lock] held. */
+    private fun watchOutputs(wanted: Boolean) {
+        if (wanted == watchingOutputs) return
+        watchingOutputs = wanted
+        runCatching {
+            if (wanted) audioManager.registerAudioDeviceCallback(outputsChanged, null) else audioManager.unregisterAudioDeviceCallback(outputsChanged)
+        }
+    }
+
+    /** What the player set up for the line: call routing on the phone's speaker, or a headset's microphone. */
+    private enum class Route { CALL, HEADSET }
+
+    /**
+     * Call routing while a chained chat is open on the phone's own speaker, the headset's microphone when it was asked
+     * for, the usual route otherwise. A route the system dropped is taken up again; a mode someone else holds, such as
+     * a phone call ringing or in progress, is left alone. [onlyWhenIdle] keeps a device that appeared mid-speech from
+     * moving the line under it: the next speech takes it up.
+     */
+    private fun reroute(onlyWhenIdle: Boolean = false) {
+        synchronized(lock) {
+            if (onlyWhenIdle && speechCount > 0) return
+            val outputs = runCatching { audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS) }.getOrNull()
+            val sco = outputs?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            // The headset's microphone only while the headset is there; call routing while a chained chat is open on
+            // the phone's own speaker; the usual route otherwise.
+            val wanted = when {
+                headsetMicOn && sco != null -> Route.HEADSET
+                chatAudioOwners.isNotEmpty() && outputs != null && outputs.none { it.type in OWN_OUTPUTS } -> Route.CALL
+                else -> null
             }
-            return
+            val held = when {
+                restoreChatAudio == null -> null
+                headsetRouting -> Route.HEADSET
+                else -> Route.CALL
+            }
+            if (wanted == held) {
+                // The system puts the mode back to normal once no call audio has played or listened for a few
+                // seconds, as between a reply and the next turn (#408). Held routing is taken up again from there, or
+                // let go if it won't take; a mode someone else holds is left alone.
+                val mode = runCatching { audioManager.mode }.getOrDefault(AudioManager.MODE_NORMAL)
+                if (held != null && mode == AudioManager.MODE_NORMAL && !retake(held)) letGo()
+            } else {
+                if (held != null) letGo()
+                if (wanted != null) open(wanted)
+            }
+            publishRoute()
         }
-        if (wanted == (held != null)) return
-        if (!wanted) {
-            held?.invoke()
-            restoreChatAudio = null
-            return
-        }
-        val mode = audioManager.mode
-        val speaker = audioManager.isSpeakerphoneOn
+    }
+
+    /** Takes a route up for the chats; called with [lock] held. Puts the usual route back where it won't take. */
+    @Suppress("DEPRECATION")
+    private fun open(route: Route) {
+        val mode = runCatching { audioManager.mode }.getOrDefault(AudioManager.MODE_NORMAL)
+        val speaker = runCatching { audioManager.isSpeakerphoneOn }.getOrDefault(false)
+        val sco = runCatching { audioManager.isBluetoothScoOn }.getOrDefault(false)
         val restore = {
             // Each step on its own: a chat's end must never throw.
-            runCatching { if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice() else audioManager.isSpeakerphoneOn = speaker }
+            runCatching {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    audioManager.clearCommunicationDevice()
+                } else {
+                    if (route == Route.HEADSET) audioManager.stopBluetoothSco()
+                    audioManager.isBluetoothScoOn = sco
+                    audioManager.isSpeakerphoneOn = speaker
+                }
+            }
             runCatching { audioManager.mode = mode }
             Unit
         }
         try {
-            check(callRouting())
+            check(take(route))
             restoreChatAudio = restore
+            headsetRouting = route == Route.HEADSET
         } catch (_: Exception) {
             restore()
+            restoreChatAudio = null
+            headsetRouting = false
         }
     }
 
-    /** Call mode on the phone's speaker; false (or a throw) when the speaker can't be the call's. */
+    /** Puts the usual route back; called with [lock] held. */
+    private fun letGo() {
+        val restore = restoreChatAudio ?: return
+        restoreChatAudio = null
+        headsetRouting = false
+        restore()
+    }
+
+    /** A route the system dropped, taken up again with the restore from before it still in hand. */
+    private fun retake(route: Route): Boolean = runCatching { take(route) }.getOrDefault(false)
+
+    /** Call mode on [route]; false (or a throw) when its device can't be the call's. */
     @Suppress("DEPRECATION")
-    private fun callRouting(): Boolean {
+    private fun take(route: Route): Boolean {
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         if (Build.VERSION.SDK_INT >= 31) {
-            val builtIn = audioManager.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            return builtIn != null && audioManager.setCommunicationDevice(builtIn)
+            val device = if (route == Route.HEADSET) {
+                audioManager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                }
+            } else {
+                audioManager.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            } ?: return false
+            return audioManager.setCommunicationDevice(device)
         }
-        audioManager.isSpeakerphoneOn = true
+        if (route == Route.HEADSET) {
+            // The headset's own microphone over SCO, as a phone call would use it.
+            audioManager.isSpeakerphoneOn = false
+            audioManager.isBluetoothScoOn = true
+            audioManager.startBluetoothSco()
+        } else {
+            audioManager.isSpeakerphoneOn = true
+        }
         return true
+    }
+
+    /** Names the output the line goes to now; a change of route changes it. */
+    private fun publishRoute() {
+        synchronized(lock) {
+            _routeLabel.value = runCatching {
+                val output = when {
+                    restoreChatAudio == null -> currentOutput()
+                    headsetRouting -> if (Build.VERSION.SDK_INT >= 31) runCatching { audioManager.communicationDevice }.getOrNull() else communicationDevice(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+                    else -> communicationDevice(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+                }
+                output?.let { name(it) } ?: if (headsetRouting) "Bluetooth" else "phone speaker"
+            }.getOrDefault("phone speaker")
+        }
+    }
+
+    /** The output the usual route plays to, as near as the system's list of them tells. */
+    private fun currentOutput(): AudioDeviceInfo? =
+        runCatching { audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS) }.getOrNull()
+            ?.minByOrNull { outputRank(it.type) }
+
+    /** The call device of [type] in use, where the platform names one. */
+    @Suppress("DEPRECATION")
+    private fun communicationDevice(type: Int): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT >= 31) {
+            runCatching { audioManager.communicationDevice }.getOrNull()?.let { if (it.type == type) return it }
+        }
+        return runCatching { audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS) }.getOrNull()
+            ?.firstOrNull { it.type == type }
+    }
+
+    /** The device's own name when it has one, else what kind it is. */
+    private fun name(device: AudioDeviceInfo): String =
+        runCatching { device.productName.toString().takeIf { it.isNotBlank() } }.getOrNull() ?: typeLabel(device.type)
+
+    /** What kind of output a device is, for one that doesn't name itself. */
+    @SuppressLint("InlinedApi") // A device only reports the types its Android knows.
+    private fun typeLabel(type: Int): String = when (type) {
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "phone speaker"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "phone earpiece"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired headset"
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "earbuds"
+        AudioDeviceInfo.TYPE_USB_HEADSET -> "USB headset"
+        AudioDeviceInfo.TYPE_HEARING_AID -> "hearing aid"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLE_BROADCAST,
+        -> "Bluetooth"
+        else -> "audio device"
+    }
+
+    /** Which output the usual route plays to, where the system can't say which one it picked. */
+    @SuppressLint("InlinedApi")
+    private fun outputRank(type: Int): Int = when (type) {
+        AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLE_BROADCAST -> 0
+        AudioDeviceInfo.TYPE_HEARING_AID -> 1
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> 2
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> 3
+        AudioDeviceInfo.TYPE_USB_HEADSET -> 4
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> 5
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 6
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_ACCESSORY -> 7
+        AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_LINE_DIGITAL, AudioDeviceInfo.TYPE_LINE_ANALOG,
+        AudioDeviceInfo.TYPE_AUX_LINE -> 8
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> 9
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> 10
+        else -> 11
     }
 
     /** Call audio while a chained chat has call routing, assistant audio otherwise. */
@@ -388,10 +560,60 @@ class AndroidSpeechPlayer(
     override fun hold(on: Boolean): Boolean {
         synchronized(lock) {
             holding = on
-            track?.let { runCatching { if (on) it.pause() else it.play() } }
-            clip?.let { runCatching { if (on) { if (it.isPlaying) it.pause() } else if (!it.isPlaying) it.start() } }
+            applyHold()
         }
         return true
+    }
+
+    /**
+     * Pauses what plays while it's held, or the speaker isn't the app's, and plays on when both let go. Called with
+     * [lock] held.
+     */
+    private fun applyHold() {
+        val paused = holding || focusHeld
+        track?.let { track ->
+            runCatching {
+                when {
+                    paused && track.playState == AudioTrack.PLAYSTATE_PLAYING -> track.pause()
+                    // A track that has only been built starts here, rather than filling its buffer unheard. One that
+                    // has played and been stopped for its tail to drain isn't started over.
+                    !paused && (track.playState == AudioTrack.PLAYSTATE_PAUSED || !trackPlayed) -> {
+                        track.play()
+                        trackPlayed = true
+                    }
+                }
+            }
+        }
+        clip?.let { runCatching { if (paused) { if (it.isPlaying) it.pause() } else if (!it.isPlaying) it.start() } }
+    }
+
+    /** The speaker came back, or was taken for a phone call or another app: the line pauses or plays on where it was. */
+    private fun focusChanged(free: Boolean) {
+        synchronized(lock) {
+            focusHeld = !free
+            applyHold()
+        }
+    }
+
+    /** Takes the speaker for a speech starting now; a speech already playing keeps it. */
+    private fun startSpeech() {
+        if (!synchronized(lock) { speechCount++ == 0 }) return
+        // Outside the lock: taking the focus may report back at once, and that takes the lock again.
+        val free = callFocus.acquire()
+        synchronized(lock) {
+            focusHeld = !free
+            applyHold()
+        }
+    }
+
+    /** Lets the speaker go once the last speech has ended. */
+    private fun endSpeech() {
+        if (!synchronized(lock) { speechCount > 0 && --speechCount == 0 }) return
+        callFocus.release()
+        synchronized(lock) {
+            focusHeld = false
+            applyHold()
+        }
     }
 
     override suspend fun playPcm(sampleRate: Int, channels: Int, chunks: ReceiveChannel<ByteArray>, onSound: (Boolean) -> Unit) = coroutineScope {
@@ -445,11 +667,16 @@ class AndroidSpeechPlayer(
             }
         }
         try {
+            startSpeech()
             withContext(Dispatchers.IO) {
                 synchronized(lock) {
                     this@AndroidSpeechPlayer.track = track
+                    trackPlayed = false
                     // Held, it fills its buffer and waits to be let go.
-                    if (!holding) track.play()
+                    if (!holding && !focusHeld) {
+                        track.play()
+                        trackPlayed = true
+                    }
                 }
                 // Provider chunks needn't end on a whole frame; what's left over waits for the next chunk.
                 var carry = ByteArray(0)
@@ -479,18 +706,22 @@ class AndroidSpeechPlayer(
                 while (draining > 0) {
                     val step = min(draining, DRAIN_STEP_MS)
                     delay(step)
-                    if (!synchronized(lock) { holding }) draining -= step
+                    if (!synchronized(lock) { holding || focusHeld }) draining -= step
                 }
             }
         } finally {
-            withContext(NonCancellable) { sound.cancelAndJoin() }
-            onSound(false)
-            synchronized(lock) { if (this@AndroidSpeechPlayer.track === track) this@AndroidSpeechPlayer.track = null }
-            runCatching {
-                track.pause()
-                track.flush()
+            try {
+                withContext(NonCancellable) { sound.cancelAndJoin() }
+                onSound(false)
+                synchronized(lock) { if (this@AndroidSpeechPlayer.track === track) this@AndroidSpeechPlayer.track = null }
+                runCatching {
+                    track.pause()
+                    track.flush()
+                }
+                track.release()
+            } finally {
+                endSpeech()
             }
-            track.release()
         }
     }
 
@@ -506,6 +737,7 @@ class AndroidSpeechPlayer(
         }
         val player = MediaPlayer()
         try {
+            startSpeech()
             suspendCancellableCoroutine { continuation ->
                 player.setAudioAttributes(
                     AudioAttributes.Builder()
@@ -526,16 +758,20 @@ class AndroidSpeechPlayer(
                 player.setOnPreparedListener {
                     synchronized(lock) {
                         clip = it
-                        if (!holding) it.start()
+                        if (!holding && !focusHeld) it.start()
                     }
                 }
                 player.prepareAsync()
                 continuation.invokeOnCancellation { runCatching { player.stop() } }
             }
         } finally {
-            synchronized(lock) { if (clip === player) clip = null }
-            player.release()
-            file.delete()
+            try {
+                synchronized(lock) { if (clip === player) clip = null }
+                player.release()
+                file.delete()
+            } finally {
+                endSpeech()
+            }
         }
     }
 

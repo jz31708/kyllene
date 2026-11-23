@@ -22,6 +22,11 @@ class WatchListenerService : WearableListenerService() {
     }
 
     override fun onMessageReceived(event: MessageEvent) {
+        // A seat's line carries the moment it starts: the cue is armed here, at once, not behind the app's queue.
+        if (event.path == WearPaths.BOARD_SPEECH) {
+            app.link.onBoardSpeech(event.data)
+            return
+        }
         app.link.onMessage(event.path, event.data, event.sourceNodeId)
     }
 

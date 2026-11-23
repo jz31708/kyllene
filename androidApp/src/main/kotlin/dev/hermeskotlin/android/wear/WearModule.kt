@@ -25,6 +25,21 @@ val wearModule = module {
     single { WatchRelay(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), CatalogueWatchCallWords) }
     single { WatchCalls(get(), get(), get(), get(), get()) }
     single { WearRequests(get(), get()) }
+    // The Board on the wrist: what the tiles show, and the notes that come back; neither needs a watch to exist.
+    single { BoardSync(androidContext(), get(), get()) }
+    single {
+        BoardNotes(androidContext(), deliver = { text, at ->
+            get<dev.hermeskotlin.android.words.OwnerWordOutbox>().deliver(
+                dev.hermeskotlin.core.words.OwnerWordDraft(
+                    text = text,
+                    kind = "text",
+                    capturedAt = at / 1000,
+                    source = "kyllene-watch",
+                ),
+            )
+        })
+    }
+    single(createdAtStart = true) { BoardTiles(get(), get(), get()).also { it.start() } }
     single(createdAtStart = true) { WatchProfileNotifier(androidContext(), get(), get(), get()).also { it.start() } }
     single { WatchRinger(androidContext(), get(), get(), get(), get(), get()) }
     single { WatchAccentSync(androidContext(), get(), get()) }
